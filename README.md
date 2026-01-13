@@ -1,7 +1,10 @@
-### À propos
+# À propos
+
 **Conpagina Éducation** est la déclinaison éducative du projet Conpagina.
 Elle permet la lecture collective, l’annotation et le travail pédagogique
 autour des textes.
+
+Une alternative open source à la défunte plateforme Glose Education
 
 Ce dépôt est **public** et accepte des contributions.
 
@@ -35,7 +38,6 @@ This repository depends on the Conpagina core but does **not** include it.
 ### License
 Apache License 2.0 – see `LICENSE` and `NOTICE`.
 
-Une alternative open source à la défunte plateforme Glose Education
 
 # La lecture sociale (social reading)
 
