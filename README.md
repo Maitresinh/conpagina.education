@@ -14,7 +14,7 @@ D'une autre coté, toutes les recherches en sociologie de l'éducation depuis so
 
 Or, les contraintes de la classe telle qu'elle est organisée ne permettent pas d'y rémedier. Paradoxalement, au delà de quelques textes épars la lecture personelle, riche, permettant une re-appropriation est pratiquement absente. En outre, l'environnement contemporain réduit encore cette possibilité. D'une part, les pratiques de lecture, concurrencées par l'offre de divertissements est en baisse accelerée. D'autre part,  Ainsi, faute de pouvoir accompagner les eleves dans les taches de lecture à la maison, les livres sont de moins en moins lus et de plus en plus rédigés par des chatbot IA.
 
-Palimpeste.education vise à réduire cette contradiction en :
+conpagina.education vise à réduire cette contradiction en :
 
 - ** Socialisant la lecture ** : en lisant à plusieurs, en pouvant partager, donner leurs avis, sur leur téléphone, la pratique de la lecture se rapproche des pratiques existants
 - ** Permettant l'accompagnement : les éléves à la maison ne sont plus livrés à eux même, et peuvent être accompagnés
