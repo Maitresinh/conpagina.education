@@ -11,7 +11,7 @@ Ce dépôt est **public** et accepte des contributions.
 ### Architecture du projet
 - **Conpagina (core)** : privé, non publié
 - **Conpagina Éducation** : public (ce dépôt)
-- **Conpagina Pro** : privé, services commerciaux
+- **Conpagina** : privé, services commerciaux
 
 Ce dépôt dépend du cœur Conpagina, mais **n’en contient pas le code**.
 
@@ -31,7 +31,7 @@ This repository is **public** and open to contributions.
 ### Project structure
 - **Conpagina (core)**: private, not published
 - **Conpagina Education**: public (this repository)
-- **Conpagina Pro**: private, commercial services
+- **Conpagina**: private, commercial services
 
 This repository depends on the Conpagina core but does **not** include it.
 
@@ -56,7 +56,6 @@ conpagina.education vise à réduire cette contradiction en :
 - ** Socialisant la lecture ** : en lisant à plusieurs, en pouvant partager, donner leurs avis, sur leur téléphone, la pratique de la lecture se rapproche des pratiques existants
 - ** Permettant l'accompagnement ** : les éléves à la maison ne sont plus livrés à eux même, et peuvent être accompagnés
 - ** Insistant sur le processus ** : se focaliser sur le processus de lecture et d'annotation plutot que de se centrer sur la tache matérielle à rendre.
-
 
 ## Fonctionnalités
 
