@@ -1,4 +1,39 @@
+### À propos
+**Conpagina Éducation** est la déclinaison éducative du projet Conpagina.
+Elle permet la lecture collective, l’annotation et le travail pédagogique
+autour des textes.
 
+Ce dépôt est **public** et accepte des contributions.
+
+### Architecture du projet
+- **Conpagina (core)** : privé, non publié
+- **Conpagina Éducation** : public (ce dépôt)
+- **Conpagina Pro** : privé, services commerciaux
+
+Ce dépôt dépend du cœur Conpagina, mais **n’en contient pas le code**.
+
+### Licence
+Apache License 2.0 – voir `LICENSE` et `NOTICE`.
+
+---
+
+## 🇬🇧 English
+
+### About
+**Conpagina Education** is the educational branch of the Conpagina project.
+It enables shared reading, annotation, and pedagogical collaboration around texts.
+
+This repository is **public** and open to contributions.
+
+### Project structure
+- **Conpagina (core)**: private, not published
+- **Conpagina Education**: public (this repository)
+- **Conpagina Pro**: private, commercial services
+
+This repository depends on the Conpagina core but does **not** include it.
+
+### License
+Apache License 2.0 – see `LICENSE` and `NOTICE`.
 
 Une alternative open source à la défunte plateforme Glose Education
 
