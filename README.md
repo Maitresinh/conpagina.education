@@ -2,7 +2,7 @@
 
 Une alternative open source à la défunte plateforme Glose Education
 
-# La lecture Sociale (social reading)
+# La lecture sociale (social reading)
 
 La lecture sociale (social Reading) tire pleinement parti de la nature dématérialisée des livres electroniques: la lecture continue d'être cette activité d'introsepction solitaire qui fait tout son interêt tout en bénéficiant des avantages de la mise en réseau. Lire seuls mais ensemble.
 Concrètement, le lecteur d’un roman peut d’annoter d’un simple clic dans la marge, l’ensemble de ces notes étant visibles aux autres membres du groupe de lecture et pouvant faire l’objet de fils de discussion.
