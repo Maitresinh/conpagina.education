@@ -280,7 +280,7 @@ However, the constraints of the classroom as currently organized do not allow fo
 - **React** 19.2
 - **TypeScript** 5
 - **Tailwind CSS** 4.1
-- **Readers**: EPUB.js, PDF.js
+- **Readers**: EPUB.js, react-reader
 - **UI**: Radix UI, shadcn/ui, Lucide Icons
 
 #### Backend
