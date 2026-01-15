@@ -18,9 +18,9 @@ export default function PrivacyPage() {
                 <h2 className="text-xl font-semibold mb-4">1. Responsable du traitement</h2>
                 <p className="text-muted-foreground">
                     {/* TODO: Personnaliser avec les vraies informations */}
-                    Le responsable du traitement des données est [Nom de l'organisation],
-                    situé à [Adresse]. Pour toute question relative à vos données personnelles,
-                    vous pouvez nous contacter à [email@example.com].
+                    Le responsable du traitement des données est Editeur des confins de l'imaginaire,
+                    situé à 740 ch du neplier 38380 St Laurent du pont. Pour toute question relative à vos données personnelles,
+                    vous pouvez nous contacter à pdapelo@gmail.com.
                 </p>
             </section>
 
