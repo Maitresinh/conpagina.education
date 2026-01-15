@@ -33,27 +33,48 @@ export default function MyBooks() {
     trpc.documents.getMyBooksWithProgress.queryOptions()
   );
 
-  // Mutation pour uploader un livre
-  const uploadBook = useMutation({
-    mutationFn: async (file: File) => {
-      const formData = new FormData();
-      formData.append("file", file);
+  // Fonction pour uploader un seul fichier
+  const uploadSingleFile = async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/api/upload/epub`, {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
+    const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/api/upload/epub`, {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Upload failed");
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || "Upload failed");
+    }
+
+    return response.json();
+  };
+
+  // Mutation pour uploader plusieurs livres
+  const uploadBooks = useMutation({
+    mutationFn: async (files: File[]) => {
+      const results: { success: string[]; failed: string[] } = { success: [], failed: [] };
+
+      for (const file of files) {
+        try {
+          await uploadSingleFile(file);
+          results.success.push(file.name);
+        } catch (error) {
+          results.failed.push(file.name);
+        }
       }
 
-      return response.json();
+      return results;
     },
-    onSuccess: async () => {
-      toast.success("Livre ajouté avec succès !");
+    onSuccess: async (results) => {
+      if (results.success.length > 0) {
+        toast.success(`${results.success.length} livre${results.success.length > 1 ? 's' : ''} ajouté${results.success.length > 1 ? 's' : ''} avec succès !`);
+      }
+      if (results.failed.length > 0) {
+        toast.error(`Échec pour ${results.failed.length} fichier${results.failed.length > 1 ? 's' : ''}: ${results.failed.join(', ')}`);
+      }
       setIsUploading(false);
       await queryClient.invalidateQueries({ queryKey: ["documents", "getMyBooks"] });
       await refetch();
@@ -91,14 +112,34 @@ export default function MyBooks() {
   });
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.type !== "application/epub+zip" && !file.name.endsWith(".epub")) {
-        toast.error("Seuls les fichiers EPUB sont acceptés");
-        return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const MAX_FILES = 10;
+    const fileArray = Array.from(files).slice(0, MAX_FILES);
+
+    if (files.length > MAX_FILES) {
+      toast.warning(`Maximum ${MAX_FILES} fichiers à la fois. Seuls les ${MAX_FILES} premiers seront importés.`);
+    }
+
+    const validFiles: File[] = [];
+    const invalidFiles: string[] = [];
+
+    for (const file of fileArray) {
+      if (file.type === "application/epub+zip" || file.name.endsWith(".epub")) {
+        validFiles.push(file);
+      } else {
+        invalidFiles.push(file.name);
       }
+    }
+
+    if (invalidFiles.length > 0) {
+      toast.error(`Fichiers non-EPUB ignorés: ${invalidFiles.join(', ')}`);
+    }
+
+    if (validFiles.length > 0) {
       setIsUploading(true);
-      uploadBook.mutate(file);
+      uploadBooks.mutate(validFiles);
     }
   };
 
@@ -135,6 +176,7 @@ export default function MyBooks() {
             onChange={handleFileSelect}
             className="hidden"
             id="book-upload"
+            multiple
           />
           <Button
             onClick={() => fileInputRef.current?.click()}
