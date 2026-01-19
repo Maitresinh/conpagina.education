@@ -82,3 +82,4 @@ backup_*.sql
 
 # Scripts personnalisés
 scripts/*.local.sh
+CLAUDE.md
