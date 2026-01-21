@@ -3,10 +3,10 @@ import { z } from "zod";
 import { unlink } from "node:fs/promises";
 import path from "node:path";
 import { db, document, readingProgress, groupMember, group, user, eq, and, or, isNull, desc, sql, ilike } from "@lectio/db";
-import { protectedProcedure, adminProcedure, router } from "../index";
+import { protectedProcedure, adminProcedure, teacherProcedure, router } from "../index";
 
 export const documentsRouter = router({
-  // Récupérer les livres personnels de l'utilisateur (exclut les livres publics)
+  // Récupérer les livres personnels de l'utilisateur (exclut les livres publics et ceux réclamés)
   getMyBooks: protectedProcedure.query(async ({ ctx }) => {
     const books = await db
       .select()
@@ -15,7 +15,11 @@ export const documentsRouter = router({
         and(
           eq(document.ownerId, ctx.session.user.id),
           isNull(document.groupId), // Livres personnels uniquement
-          eq(document.isPublic, "false") // Exclure les livres publics
+          eq(document.isPublic, "false"), // Exclure les livres publics
+          or(
+            isNull(document.claimedFromPublic),
+            eq(document.claimedFromPublic, "false")
+          ) // Exclure les livres réclamés depuis la bibliothèque publique
         )
       )
       .orderBy(desc(document.createdAt));
@@ -576,12 +580,12 @@ export const documentsRouter = router({
       return { success: true, book: newBook };
     }),
 
-  // Marquer un livre comme public (admin uniquement)
-  markAsPublic: adminProcedure
+  // Marquer un livre comme public (teacher/admin)
+  markAsPublic: teacherProcedure
     .input(z.object({
       documentId: z.string(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const [book] = await db
         .select()
         .from(document)
@@ -592,6 +596,14 @@ export const documentsRouter = router({
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Document not found",
+        });
+      }
+
+      // Vérifier que l'utilisateur est le propriétaire du livre ou admin
+      if (book.ownerId !== ctx.session.user.id && ctx.session.user.role !== "ADMIN") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Vous ne pouvez rendre public que vos propres livres",
         });
       }
 

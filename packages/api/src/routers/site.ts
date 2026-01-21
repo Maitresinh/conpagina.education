@@ -47,6 +47,8 @@ export const SITE_CONFIG_KEYS = {
     // Contact
     CONTACT_EMAIL: "contact_email",
     CONTACT_SUPPORT_EMAIL: "contact_support_email",
+    // RGPD
+    GDPR_TEXT: "gdpr_text",
 } as const;
 
 // Features disponibles pour la homepage
@@ -97,6 +99,32 @@ const DEFAULT_CONFIG: Record<string, string> = {
     [SITE_CONFIG_KEYS.LEGAL_HOST_WEBSITE]: "https://www.ovh.com",
     [SITE_CONFIG_KEYS.CONTACT_EMAIL]: "pdapelo@gmail.com",
     [SITE_CONFIG_KEYS.CONTACT_SUPPORT_EMAIL]: "pdapelo@gmail.com",
+    [SITE_CONFIG_KEYS.GDPR_TEXT]: `# Politique de protection des données personnelles (RGPD)
+
+## 1. Collecte des données
+Nous collectons les données suivantes :
+- Nom et prénom
+- Adresse email
+- Données de navigation et d'utilisation de la plateforme
+
+## 2. Utilisation des données
+Vos données sont utilisées pour :
+- Créer et gérer votre compte utilisateur
+- Vous permettre d'accéder aux fonctionnalités de lecture et d'annotation
+- Améliorer nos services
+
+## 3. Conservation des données
+Vos données sont conservées pendant toute la durée de votre utilisation du service et supprimées sur demande.
+
+## 4. Vos droits
+Conformément au RGPD, vous disposez des droits suivants :
+- Droit d'accès à vos données
+- Droit de rectification
+- Droit à l'effacement
+- Droit à la portabilité
+- Droit d'opposition
+
+Pour exercer ces droits, contactez-nous à l'adresse indiquée dans les mentions légales.`,
 };
 
 // Helper pour récupérer toutes les configs
@@ -180,6 +208,14 @@ export const siteRouter = router({
             hostWebsite: configMap[SITE_CONFIG_KEYS.LEGAL_HOST_WEBSITE],
             contactEmail: configMap[SITE_CONFIG_KEYS.CONTACT_EMAIL],
             supportEmail: configMap[SITE_CONFIG_KEYS.CONTACT_SUPPORT_EMAIL],
+        };
+    }),
+
+    // Récupérer le texte RGPD (public - pour l'inscription)
+    getGdprText: publicProcedure.query(async () => {
+        const configMap = await getConfigMap();
+        return {
+            gdprText: configMap[SITE_CONFIG_KEYS.GDPR_TEXT],
         };
     }),
 
@@ -300,6 +336,7 @@ export const siteRouter = router({
                 hostWebsite: z.string().max(200).optional(),
                 contactEmail: z.string().email().optional(),
                 supportEmail: z.string().email().optional(),
+                gdprText: z.string().max(10000).optional(),
             })
         )
         .mutation(async ({ input }) => {
@@ -340,6 +377,9 @@ export const siteRouter = router({
             }
             if (input.supportEmail !== undefined) {
                 updates.push({ key: SITE_CONFIG_KEYS.CONTACT_SUPPORT_EMAIL, value: input.supportEmail });
+            }
+            if (input.gdprText !== undefined) {
+                updates.push({ key: SITE_CONFIG_KEYS.GDPR_TEXT, value: input.gdprText });
             }
 
             for (const update of updates) {
@@ -416,6 +456,8 @@ export const siteRouter = router({
             legalHostWebsite: configMap[SITE_CONFIG_KEYS.LEGAL_HOST_WEBSITE],
             contactEmail: configMap[SITE_CONFIG_KEYS.CONTACT_EMAIL],
             contactSupportEmail: configMap[SITE_CONFIG_KEYS.CONTACT_SUPPORT_EMAIL],
+            // RGPD
+            gdprText: configMap[SITE_CONFIG_KEYS.GDPR_TEXT],
         };
     }),
 });

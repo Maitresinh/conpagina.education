@@ -2,7 +2,7 @@
 // Unified BookCard Component v1.2
 
 import { Card } from "@/components/ui/card";
-import { BookOpen, MoreVertical, Trash2, GraduationCap, Globe, User } from "lucide-react";
+import { BookOpen, MoreVertical, Trash2, GraduationCap, Globe, User, Share2 } from "lucide-react";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -33,6 +33,7 @@ interface BookCardProps {
     // Actions
     onDelete?: () => void; // For "My Books" (delete from library)
     onRemoveFromGroup?: () => void; // For "Group Books" (remove from group)
+    onMakePublic?: () => void; // For "My Books" (make book public - teacher/admin only)
     canManage?: boolean; // For "Group Books" (permission check)
     isLoading?: boolean; // Show loading spinner overlay
     showSourceBadge?: boolean; // Show source indicator badge
@@ -44,12 +45,13 @@ export function BookCard({
     onClick,
     onDelete,
     onRemoveFromGroup,
+    onMakePublic,
     canManage = true, // Default to true for My Books context where user owns the book
     isLoading = false,
     showSourceBadge = false,
 }: BookCardProps) {
     // Determine if we should show the dropdown or just a delete button or nothing
-    const showActions = !!onDelete || (!!onRemoveFromGroup && canManage);
+    const showActions = !!onDelete || (!!onRemoveFromGroup && canManage) || !!onMakePublic;
 
     // Source badge logic
     const isGroupBook = !!book.groupId;
@@ -140,6 +142,19 @@ export function BookCard({
                                 <MoreVertical className="h-3.5 w-3.5" />
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                                {onMakePublic && (
+                                    <DropdownMenuItem
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (confirm("Rendre ce livre accessible à tous dans la bibliothèque publique ?")) {
+                                                onMakePublic();
+                                            }
+                                        }}
+                                    >
+                                        <Share2 className="h-4 w-4 mr-2" />
+                                        Rendre public
+                                    </DropdownMenuItem>
+                                )}
                                 {onDelete && (
                                     <DropdownMenuItem
                                         variant="destructive"

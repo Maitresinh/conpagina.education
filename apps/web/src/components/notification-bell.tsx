@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { trpc } from "@/utils/trpc";
+import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -24,13 +25,17 @@ export function NotificationBell() {
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
 
-  // Vérifier si l'utilisateur est connecté et son rôle
-  const { data: privateData, isLoading: isLoadingAuth } = useQuery(
-    trpc.privateData.queryOptions()
-  );
+  // Vérifier si l'utilisateur est connecté via authClient
+  const { data: session, isPending: isLoadingAuth } = authClient.useSession();
+  const isLoggedIn = !!session?.user;
+
+  // Récupérer les données privées seulement si connecté
+  const { data: privateData } = useQuery({
+    ...trpc.privateData.queryOptions(),
+    enabled: isLoggedIn,
+  });
 
   // Récupérer le nombre de notifications non lues (pour tous les utilisateurs connectés)
-  const isLoggedIn = !!privateData?.user;
   const { data: unreadData } = useQuery({
     ...trpc.notifications.getUnreadCount.queryOptions(),
     enabled: isLoggedIn,
@@ -120,7 +125,7 @@ export function NotificationBell() {
   });
 
   // Ne pas afficher si pas connecté ou en cours de chargement
-  if (isLoadingAuth || !privateData?.user) {
+  if (isLoadingAuth || !isLoggedIn) {
     return null;
   }
 

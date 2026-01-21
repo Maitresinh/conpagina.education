@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
     Settings, Upload, Save, Loader2, Image as ImageIcon, RefreshCw, ZoomIn, Sun, Moon,
     BookOpen, Highlighter, MessageSquare, Users, BarChart3, Palette, Eye, EyeOff,
-    Building2, Phone, Mail, Globe, User, MapPin, Shield, Pencil, X, Check
+    Building2, Phone, Mail, Globe, User, MapPin, Shield, Pencil, X, Check, FileText
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -171,6 +171,7 @@ export default function AdminSettingsPage() {
         hostWebsite: "",
         contactEmail: "",
         supportEmail: "",
+        gdprText: "",
     });
 
     // État pour le preview du logo uploadé
@@ -206,6 +207,7 @@ export default function AdminSettingsPage() {
                 hostWebsite: config.legalHostWebsite,
                 contactEmail: config.contactEmail,
                 supportEmail: config.contactSupportEmail,
+                gdprText: config.gdprText,
             });
         }
     }, [config]);
@@ -708,6 +710,7 @@ export default function AdminSettingsPage() {
                                                         hostWebsite: config.legalHostWebsite,
                                                         contactEmail: config.contactEmail,
                                                         supportEmail: config.contactSupportEmail,
+                                                        gdprText: config.gdprText,
                                                     });
                                                     toast.info("Formulaire réinitialisé");
                                                 }
@@ -900,6 +903,35 @@ export default function AdminSettingsPage() {
                                             Pour l'assistance technique
                                         </p>
                                     </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        {/* RGPD */}
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-lg flex items-center gap-2">
+                                    <FileText className="h-5 w-5" />
+                                    Texte RGPD
+                                </CardTitle>
+                                <CardDescription>
+                                    Texte affiché lors de l'inscription pour le consentement RGPD. Supporte le format Markdown.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="space-y-2">
+                                    <Label htmlFor="gdprText">Politique de protection des données</Label>
+                                    <Textarea
+                                        id="gdprText"
+                                        value={legalData.gdprText}
+                                        onChange={(e) => handleLegalChange("gdprText", e.target.value)}
+                                        placeholder="# Politique RGPD&#10;&#10;Décrivez ici comment vous collectez et utilisez les données personnelles..."
+                                        rows={15}
+                                        className="font-mono text-sm"
+                                    />
+                                    <p className="text-xs text-muted-foreground">
+                                        Ce texte sera affiché dans une fenêtre modale lors de l'inscription. L'utilisateur devra l'accepter pour créer son compte.
+                                    </p>
                                 </div>
                             </CardContent>
                         </Card>

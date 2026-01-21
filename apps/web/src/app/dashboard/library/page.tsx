@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, FileText, Upload, Trash2, MoreVertical, Library, Search, Plus, Globe } from "lucide-react";
+import { BookOpen, FileText, Upload, Trash2, MoreVertical, Library, Search, Plus, Globe, FolderOpen } from "lucide-react";
 import { toast } from "sonner";
 
 import { trpc } from "@/utils/trpc";
@@ -25,6 +25,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export default function PublicLibraryPage() {
   const [search, setSearch] = useState("");
@@ -32,6 +34,8 @@ export default function PublicLibraryPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [claimingBookId, setClaimingBookId] = useState<string | null>(null);
+  const [selectedBooks, setSelectedBooks] = useState<Set<string>>(new Set());
+  const [isPublishing, setIsPublishing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -48,34 +52,63 @@ export default function PublicLibraryPage() {
   // Get user role
   const { data: userData } = useQuery(trpc.user.me.queryOptions());
   const isAdmin = userData?.role === "ADMIN";
+  const isTeacher = userData?.role === "TEACHER";
+  const canManageLibrary = isAdmin || isTeacher;
 
   // Get public library books
   const { data: books, isLoading, refetch } = useQuery(
     trpc.documents.getPublicLibrary.queryOptions({ search: debouncedSearch || undefined })
   );
 
-  // Mutation for uploading a public book (admin only)
-  const uploadPublicBook = useMutation({
-    mutationFn: async (file: File) => {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("isPublic", "true");
+  // Get personal books for import (only for teachers/admins)
+  const { data: myBooks } = useQuery({
+    ...trpc.documents.getMyBooks.queryOptions(),
+    enabled: canManageLibrary && showUploadDialog,
+  });
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/api/upload/epub`, {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
+  // Fonction pour uploader un seul fichier public
+  const uploadSinglePublicFile = async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("isPublic", "true");
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Upload failed");
+    const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/api/upload/epub`, {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || "Upload failed");
+    }
+
+    return response.json();
+  };
+
+  // Mutation for uploading multiple public books (admin only)
+  const uploadPublicBooks = useMutation({
+    mutationFn: async (files: File[]) => {
+      const results: { success: string[]; failed: string[] } = { success: [], failed: [] };
+
+      for (const file of files) {
+        try {
+          await uploadSinglePublicFile(file);
+          results.success.push(file.name);
+        } catch (error) {
+          results.failed.push(file.name);
+        }
       }
 
-      return response.json();
+      return results;
     },
-    onSuccess: async () => {
-      toast.success("Livre ajouté à la bibliothèque publique !");
+    onSuccess: async (results) => {
+      if (results.success.length > 0) {
+        toast.success(`${results.success.length} livre${results.success.length > 1 ? 's' : ''} ajouté${results.success.length > 1 ? 's' : ''} à la bibliothèque publique !`);
+      }
+      if (results.failed.length > 0) {
+        toast.error(`Échec pour ${results.failed.length} fichier${results.failed.length > 1 ? 's' : ''}: ${results.failed.join(', ')}`);
+      }
       setIsUploading(false);
       setShowUploadDialog(false);
       await queryClient.invalidateQueries({ queryKey: ["documents", "getPublicLibrary"] });
@@ -89,6 +122,50 @@ export default function PublicLibraryPage() {
       setIsUploading(false);
     },
   });
+
+  // Mutation for making books public
+  const makePublic = useMutation(
+    trpc.documents.markAsPublic.mutationOptions({
+      onSuccess: async () => {
+        await queryClient.invalidateQueries({ queryKey: ["documents", "getPublicLibrary"] });
+        await queryClient.invalidateQueries({ queryKey: ["documents", "getMyBooks"] });
+        await refetch();
+      },
+      onError: (error) => {
+        toast.error(error.message || "Erreur lors de la publication");
+      },
+    })
+  );
+
+  // Handler pour publier les livres sélectionnés
+  const handlePublishSelected = async () => {
+    if (selectedBooks.size === 0) return;
+
+    setIsPublishing(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const bookId of selectedBooks) {
+      try {
+        await makePublic.mutateAsync({ documentId: bookId });
+        successCount++;
+      } catch {
+        failCount++;
+      }
+    }
+
+    setIsPublishing(false);
+    setSelectedBooks(new Set());
+
+    if (successCount > 0) {
+      toast.success(`${successCount} livre${successCount > 1 ? 's' : ''} ajouté${successCount > 1 ? 's' : ''} à la bibliothèque publique !`);
+    }
+    if (failCount > 0) {
+      toast.error(`Échec pour ${failCount} livre${failCount > 1 ? 's' : ''}`);
+    }
+
+    setShowUploadDialog(false);
+  };
 
   // Mutation for removing from public library (marking as private)
   const removeFromPublic = useMutation(
@@ -127,14 +204,34 @@ export default function PublicLibraryPage() {
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.type !== "application/epub+zip" && !file.name.endsWith(".epub")) {
-        toast.error("Seuls les fichiers EPUB sont acceptés");
-        return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const MAX_FILES = 20;
+    const fileArray = Array.from(files).slice(0, MAX_FILES);
+
+    if (files.length > MAX_FILES) {
+      toast.warning(`Maximum ${MAX_FILES} fichiers à la fois. Seuls les ${MAX_FILES} premiers seront importés.`);
+    }
+
+    const validFiles: File[] = [];
+    const invalidFiles: string[] = [];
+
+    for (const file of fileArray) {
+      if (file.type === "application/epub+zip" || file.name.endsWith(".epub")) {
+        validFiles.push(file);
+      } else {
+        invalidFiles.push(file.name);
       }
+    }
+
+    if (invalidFiles.length > 0) {
+      toast.error(`Fichiers non-EPUB ignorés: ${invalidFiles.join(', ')}`);
+    }
+
+    if (validFiles.length > 0) {
       setIsUploading(true);
-      uploadPublicBook.mutate(file);
+      uploadPublicBooks.mutate(validFiles);
     }
   };
 
@@ -159,7 +256,7 @@ export default function PublicLibraryPage() {
           <Globe className="h-5 w-5" />
           Bibliothèque publique
         </h1>
-        {isAdmin && (
+        {canManageLibrary && (
           <Button
             onClick={() => setShowUploadDialog(true)}
             size="sm"
@@ -279,50 +376,139 @@ export default function PublicLibraryPage() {
         </div>
       )}
 
-      {/* Upload dialog for admins */}
-      <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
-        <DialogContent>
+      {/* Upload dialog for teachers/admins */}
+      <Dialog open={showUploadDialog} onOpenChange={(open) => {
+        setShowUploadDialog(open);
+        if (!open) {
+          setSelectedBooks(new Set());
+        }
+      }}>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Globe className="h-5 w-5" />
-              Ajouter un livre public
+              Ajouter à la bibliothèque publique
             </DialogTitle>
             <DialogDescription>
-              Ce livre sera accessible à tous les utilisateurs de la plateforme.
+              Ces livres seront accessibles à tous les utilisateurs de la plateforme.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".epub,application/epub+zip"
-              onChange={handleFileSelect}
-              className="hidden"
-              id="public-book-upload"
-            />
-            <Button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-              className="w-full gap-2"
-              variant="outline"
-            >
-              {isUploading ? (
+          <Tabs defaultValue="upload" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="upload" className="gap-2">
+                <Upload className="h-4 w-4" />
+                Uploader
+              </TabsTrigger>
+              <TabsTrigger value="import" className="gap-2">
+                <FolderOpen className="h-4 w-4" />
+                Mes livres
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="upload" className="space-y-4 py-4">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".epub,application/epub+zip"
+                onChange={handleFileSelect}
+                className="hidden"
+                id="public-book-upload"
+                multiple
+              />
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="w-full gap-2"
+                variant="outline"
+              >
+                {isUploading ? (
+                  <>
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    Upload en cours...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-4 w-4" />
+                    Sélectionner des fichiers EPUB
+                  </>
+                )}
+              </Button>
+              <p className="text-xs text-muted-foreground text-center">
+                Seuls les fichiers EPUB sont acceptés. Vous pouvez en sélectionner plusieurs (max 20).
+              </p>
+            </TabsContent>
+
+            <TabsContent value="import" className="space-y-4 py-4">
+              {myBooks && myBooks.length > 0 ? (
                 <>
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                  Upload en cours...
+                  <div className="max-h-[300px] overflow-y-auto space-y-2 border rounded-lg p-2">
+                    {myBooks.map((book: any) => (
+                      <label
+                        key={book.id}
+                        className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted cursor-pointer"
+                      >
+                        <Checkbox
+                          checked={selectedBooks.has(book.id)}
+                          onCheckedChange={(checked) => {
+                            const newSelected = new Set(selectedBooks);
+                            if (checked) {
+                              newSelected.add(book.id);
+                            } else {
+                              newSelected.delete(book.id);
+                            }
+                            setSelectedBooks(newSelected);
+                          }}
+                        />
+                        <img
+                          src={`${process.env.NEXT_PUBLIC_SERVER_URL}/api/cover/${book.id}`}
+                          alt={book.title}
+                          className="h-12 w-8 object-cover rounded"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{book.title}</p>
+                          {book.author && (
+                            <p className="text-xs text-muted-foreground truncate">{book.author}</p>
+                          )}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-muted-foreground">
+                      {selectedBooks.size} livre{selectedBooks.size > 1 ? 's' : ''} sélectionné{selectedBooks.size > 1 ? 's' : ''}
+                    </p>
+                    <Button
+                      onClick={handlePublishSelected}
+                      disabled={selectedBooks.size === 0 || isPublishing}
+                      className="gap-2"
+                    >
+                      {isPublishing ? (
+                        <>
+                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                          Publication...
+                        </>
+                      ) : (
+                        <>
+                          <Globe className="h-4 w-4" />
+                          Rendre public
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </>
               ) : (
-                <>
-                  <Upload className="h-4 w-4" />
-                  Sélectionner un fichier EPUB
-                </>
+                <div className="text-center py-8 text-muted-foreground">
+                  <FolderOpen className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                  <p>Vous n'avez pas de livres personnels à importer.</p>
+                  <p className="text-xs mt-1">Uploadez d'abord des livres dans "Mes lectures".</p>
+                </div>
               )}
-            </Button>
-            <p className="text-xs text-muted-foreground text-center">
-              Seuls les fichiers EPUB sont acceptés.
-            </p>
-          </div>
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
     </div>

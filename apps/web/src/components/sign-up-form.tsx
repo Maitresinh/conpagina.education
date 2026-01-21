@@ -1,27 +1,48 @@
 import { useForm } from "@tanstack/react-form";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { useState } from "react";
 import { toast } from "sonner";
 import z from "zod";
 
 import { authClient } from "@/lib/auth-client";
+import { trpc } from "@/utils/trpc";
 
 import Loader from "./loader";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
 export default function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () => void }) {
   const { isPending } = authClient.useSession();
+  const [showGdprModal, setShowGdprModal] = useState(false);
+  const [gdprAccepted, setGdprAccepted] = useState(false);
+
+  // Récupérer le texte RGPD
+  const { data: gdprData } = useQuery(trpc.site.getGdprText.queryOptions());
 
   const form = useForm({
     defaultValues: {
       email: "",
       password: "",
       name: "",
-      acceptTerms: false,
     },
     onSubmit: async ({ value }) => {
+      // Vérifier que RGPD est accepté
+      if (!gdprAccepted) {
+        setShowGdprModal(true);
+        return;
+      }
+
       await authClient.signUp.email(
         {
           email: value.email,
@@ -53,12 +74,20 @@ export default function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () 
           .regex(/[A-Z]/, "Le mot de passe doit contenir au moins une majuscule")
           .regex(/[a-z]/, "Le mot de passe doit contenir au moins une minuscule")
           .regex(/[0-9]/, "Le mot de passe doit contenir au moins un chiffre"),
-        acceptTerms: z.boolean().refine((val) => val === true, {
-          message: "Vous devez accepter les conditions d'utilisation",
-        }),
       }),
     },
   });
+
+  // Handler pour accepter les conditions RGPD et soumettre le formulaire
+  const handleAcceptGdpr = () => {
+    setGdprAccepted(true);
+    setShowGdprModal(false);
+    toast.success("Conditions acceptées");
+    // Soumettre le formulaire après acceptation
+    setTimeout(() => {
+      form.handleSubmit();
+    }, 100);
+  };
 
   if (isPending) {
     return <Loader />;
@@ -159,36 +188,56 @@ export default function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () 
           </p>
         </div>
 
-        <div>
-          <form.Field name="acceptTerms">
-            {(field) => (
-              <div className="space-y-2">
-                <div className="flex items-start gap-3">
-                  <Checkbox
-                    id={field.name}
-                    checked={field.state.value}
-                    onCheckedChange={(checked) => field.handleChange(checked === true)}
-                  />
-                  <Label htmlFor={field.name} className="text-sm leading-normal cursor-pointer">
-                    J'accepte les{" "}
-                    <Link href={"/legal" as any} className="text-primary hover:underline" target="_blank">
-                      CGU
-                    </Link>{" "}
-                    et la{" "}
-                    <Link href={"/privacy" as any} className="text-primary hover:underline" target="_blank">
-                      politique de confidentialité
-                    </Link>
-                  </Label>
-                </div>
-                {field.state.meta.errors.map((error) => (
-                  <p key={error?.message} className="text-red-500 text-sm">
-                    {error?.message}
-                  </p>
-                ))}
+        {/* Indicateur RGPD */}
+        <label
+          htmlFor="gdpr-accepted"
+          className="flex gap-3 p-3 border rounded-lg bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors"
+        >
+          <Checkbox
+            id="gdpr-accepted"
+            checked={gdprAccepted}
+            onCheckedChange={() => {
+              if (!gdprAccepted) {
+                setShowGdprModal(true);
+              }
+            }}
+            className="shrink-0"
+          />
+          <span className="text-sm">
+            J'accepte les{" "}
+            <Link href="/legal" className="text-primary hover:underline" target="_blank" onClick={(e) => e.stopPropagation()}>CGU</Link>,{" "}
+            la <Link href="/privacy" className="text-primary hover:underline" target="_blank" onClick={(e) => e.stopPropagation()}>politique de confidentialité</Link>{" "}
+            et la <button type="button" onClick={(e) => { e.preventDefault(); setShowGdprModal(true); }} className="text-primary hover:underline">politique RGPD</button>
+            {gdprAccepted && <span className="text-green-600 font-medium"> (accepté)</span>}
+          </span>
+        </label>
+
+        {/* Modal RGPD - Grande fenêtre popup */}
+        <Dialog open={showGdprModal} onOpenChange={setShowGdprModal}>
+          <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] flex flex-col">
+            <DialogHeader className="pb-4 border-b">
+              <DialogTitle className="text-2xl font-bold">
+                Protection des données personnelles (RGPD)
+              </DialogTitle>
+              <DialogDescription className="text-base">
+                Veuillez lire attentivement notre politique de protection des données personnelles avant de créer votre compte.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto py-6 px-2">
+              <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap leading-relaxed">
+                {gdprData?.gdprText || "Chargement..."}
               </div>
-            )}
-          </form.Field>
-        </div>
+            </div>
+            <DialogFooter className="flex-shrink-0 pt-4 border-t gap-3 sm:gap-3">
+              <Button variant="outline" size="lg" onClick={() => setShowGdprModal(false)}>
+                Annuler
+              </Button>
+              <Button size="lg" onClick={handleAcceptGdpr}>
+                J'ai lu et j'accepte les conditions
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <form.Subscribe>
           {(state) => (

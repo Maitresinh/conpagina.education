@@ -116,6 +116,21 @@ export default function MyBooks() {
     },
   });
 
+  // Mutation pour rendre un livre public
+  const makePublic = useMutation(
+    trpc.documents.markAsPublic.mutationOptions({
+      onSuccess: async () => {
+        toast.success("Livre ajouté à la bibliothèque publique !");
+        await queryClient.invalidateQueries({ queryKey: ["documents", "getAccessibleBooksWithProgress"] });
+        await queryClient.invalidateQueries({ queryKey: ["documents", "getPublicLibrary"] });
+        await refetch();
+      },
+      onError: (error) => {
+        toast.error(error.message || "Erreur lors de la publication");
+      },
+    })
+  );
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -237,6 +252,7 @@ export default function MyBooks() {
         <div className="grid grid-cols-3 md:grid-cols-3 gap-3">
           {books?.map((book: any) => {
             const isPersonalBook = !book.groupId && book.ownerId === userData?.id;
+            const canMakePublic = isPersonalBook && canUpload && book.isPublic !== "true";
             return (
               <BookCard
                 key={book.id}
@@ -244,6 +260,7 @@ export default function MyBooks() {
                 currentUserId={userData?.id}
                 showSourceBadge={true}
                 onDelete={isPersonalBook ? () => deleteBook.mutate(book.id) : undefined}
+                onMakePublic={canMakePublic ? () => makePublic.mutate({ documentId: book.id }) : undefined}
                 onClick={() => router.push(`/read/${book.id}` as any)}
               />
             );
