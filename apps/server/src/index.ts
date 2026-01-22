@@ -10,6 +10,7 @@ import { logger } from "hono/logger";
 import { writeFile } from "node:fs/promises";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 
 // ============================================
 // STRUCTURED LOGGING - JSON logs for production
@@ -567,6 +568,149 @@ app.get("/", (c) => {
   return c.text("OK");
 });
 
+// Constantes pour les covers
+const COVERS_DIR = "uploads/covers";
+const COVER_WIDTH = 400; // Largeur max en pixels
+const COVER_QUALITY = 80; // Qualité JPEG (0-100)
+const FETCH_TIMEOUT = 5000; // Timeout en ms
+
+// Helper pour fetch avec timeout
+async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Générer un hash simple pour le cache basé sur titre+auteur
+function getCoverCacheKey(title: string, author: string | null): string {
+  const str = `${title.toLowerCase().trim()}|${(author || "").toLowerCase().trim()}`;
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return Math.abs(hash).toString(36);
+}
+
+// Fonction pour chercher une cover sur Open Library avec cache intelligent
+async function fetchOpenLibraryCover(title: string, author: string | null, _fileId?: string) {
+  // Cache basé sur titre+auteur (pas fileId) pour éviter les doublons
+  const cacheKey = getCoverCacheKey(title, author);
+  const coverPath = `${COVERS_DIR}/${cacheKey}.jpg`;
+  const noCoverPath = `${COVERS_DIR}/${cacheKey}.nocover`;
+  
+  // 1. Vérifier le cache - cover déjà téléchargée
+  const cachedCover = Bun.file(coverPath);
+  if (await cachedCover.exists()) {
+    return new Response(await cachedCover.arrayBuffer(), {
+      headers: {
+        "Content-Type": "image/jpeg",
+        "Cache-Control": "public, max-age=604800", // 7 jours
+      },
+    });
+  }
+  
+  // 2. Vérifier si déjà marqué "pas de cover"
+  const noCoverMarker = Bun.file(noCoverPath);
+  if (await noCoverMarker.exists()) {
+    return generatePlaceholderSvg();
+  }
+  
+  // 3. Nettoyer titre et auteur pour la recherche
+  const cleanTitle = title
+    .replace(/\.epub$/i, "")
+    .replace(/[_\-\.]+/g, " ")
+    .replace(/\([^)]*\)/g, "") // Enlever les parenthèses
+    .replace(/\[[^\]]*\]/g, "") // Enlever les crochets
+    .replace(/\s+/g, " ")
+    .trim();
+  
+  const cleanAuthor = author
+    ?.replace(/[_\-\.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  
+  // 4. Rechercher sur Open Library
+  try {
+    const query = encodeURIComponent(
+      cleanAuthor ? `${cleanTitle} ${cleanAuthor}` : cleanTitle
+    );
+    
+    console.log(`📚 Open Library: "${cleanTitle}" by "${cleanAuthor || '?'}"`);
+    
+    const searchRes = await fetchWithTimeout(
+      `https://openlibrary.org/search.json?q=${query}&limit=5&fields=cover_i`,
+      FETCH_TIMEOUT
+    );
+    
+    if (!searchRes.ok) throw new Error(`Search failed: ${searchRes.status}`);
+    
+    const data = await searchRes.json() as { docs?: Array<{ cover_i?: number }> };
+    const docWithCover = data.docs?.find(doc => doc.cover_i);
+    
+    if (docWithCover?.cover_i) {
+      // Télécharger la cover (taille M = medium)
+      const coverRes = await fetchWithTimeout(
+        `https://covers.openlibrary.org/b/id/${docWithCover.cover_i}-M.jpg`,
+        FETCH_TIMEOUT
+      );
+      
+      if (coverRes.ok) {
+        const rawBuffer = Buffer.from(await coverRes.arrayBuffer());
+        
+        // Compresser et redimensionner avec sharp
+        const optimizedBuffer = await sharp(rawBuffer)
+          .resize(COVER_WIDTH, null, { withoutEnlargement: true })
+          .jpeg({ quality: COVER_QUALITY, progressive: true })
+          .toBuffer();
+        
+        // Sauvegarder en cache
+        await mkdir(COVERS_DIR, { recursive: true });
+        await writeFile(coverPath, optimizedBuffer);
+        console.log(`📚 Cover cached: ${cacheKey} (${Math.round(optimizedBuffer.length / 1024)}KB)`);
+        
+        return new Response(optimizedBuffer, {
+          headers: {
+            "Content-Type": "image/jpeg",
+            "Cache-Control": "public, max-age=604800",
+          },
+        });
+      }
+    }
+    
+    // Pas de cover trouvée - marquer pour éviter de refaire la requête
+    await mkdir(COVERS_DIR, { recursive: true });
+    await writeFile(noCoverPath, new Date().toISOString());
+    console.log(`📚 No cover found: ${cacheKey}`);
+  } catch (error) {
+    // En cas d'erreur réseau, ne pas marquer .nocover (on réessaiera)
+    console.error("📚 Open Library error:", error instanceof Error ? error.message : error);
+  }
+  
+  return generatePlaceholderSvg();
+}
+
+function generatePlaceholderSvg() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">
+    <rect width="300" height="450" fill="#f5f5f5"/>
+    <rect x="100" y="150" width="100" height="130" rx="4" fill="none" stroke="#d4d4d4" stroke-width="2"/>
+    <path d="M120 170 h60 M120 190 h50 M120 210 h40" stroke="#d4d4d4" stroke-width="2" stroke-linecap="round"/>
+    <text x="150" y="320" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" fill="#a3a3a3">Pas de couverture</text>
+  </svg>`;
+  
+  return new Response(svg, {
+    headers: {
+      "Content-Type": "image/svg+xml",
+      "Cache-Control": "public, max-age=3600",
+    },
+  });
+}
+
 // Endpoint pour extraire la cover d'un EPUB
 app.get("/api/cover/:fileId", async (c) => {
   try {
@@ -685,8 +829,8 @@ app.get("/api/cover/:fileId", async (c) => {
     }
 
     if (!coverPath) {
-      // Retourner une image placeholder
-      return c.redirect("/placeholder-cover.png");
+      // Chercher une cover sur Open Library
+      return fetchOpenLibraryCover(doc.title, doc.author, fileId);
     }
 
     // Normaliser le chemin (enlever les ./ et résoudre les ..)
@@ -694,7 +838,8 @@ app.get("/api/cover/:fileId", async (c) => {
 
     const coverFile = zip.file(coverPath);
     if (!coverFile) {
-      return c.redirect("/placeholder-cover.png");
+      // Chercher une cover sur Open Library
+      return fetchOpenLibraryCover(doc.title, doc.author, fileId);
     }
 
     const coverBuffer = await coverFile.async("arraybuffer");

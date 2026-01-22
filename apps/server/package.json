@@ -22,6 +22,7 @@
     "dotenv": "catalog:",
     "hono": "catalog:",
     "jszip": "^3.10.1",
+    "sharp": "^0.34.5",
     "zod": "catalog:"
   },
   "devDependencies": {

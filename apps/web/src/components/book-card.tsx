@@ -72,9 +72,17 @@ export function BookCard({
                         (e.target as HTMLImageElement).style.display = 'none';
                     }}
                 />
-                {/* Fallback visual */}
-                <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-muted to-muted/80 -z-10">
-                    <BookOpen className="h-12 w-12 text-muted-foreground/20" />
+                {/* Fallback visual avec titre centré */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-muted to-muted/80 -z-10 p-4">
+                    <BookOpen className="h-10 w-10 text-muted-foreground/30 mb-3" />
+                    <p className="text-xs text-muted-foreground/60 text-center line-clamp-3 font-medium leading-tight">
+                        {book.title}
+                    </p>
+                    {book.author && (
+                        <p className="text-[10px] text-muted-foreground/40 text-center mt-1 line-clamp-1">
+                            {book.author}
+                        </p>
+                    )}
                 </div>
 
                 {/* Loading overlay */}
