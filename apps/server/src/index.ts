@@ -7,13 +7,14 @@ import { db, document, groupMember, user, eq, and, sql } from "@lectio/db";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
-import { writeFile } from "node:fs/promises";
+import { writeFile, readdir, stat, unlink, appendFile, readFile } from "node:fs/promises";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { existsSync, appendFileSync, mkdirSync } from "node:fs";
 import sharp from "sharp";
 
 // ============================================
-// STRUCTURED LOGGING - JSON logs for production
+// STRUCTURED LOGGING - JSON logs with file persistence
 // ============================================
 const isProduction = process.env.NODE_ENV === "production";
 
@@ -29,6 +30,165 @@ interface LogEntry {
     message: string;
     stack?: string;
   };
+}
+
+// Ring buffer pour garder les derniers logs en mémoire
+const LOG_BUFFER_SIZE = 1000;
+const logBuffer: LogEntry[] = [];
+let logBufferIndex = 0;
+
+// Configuration persistance
+const LOGS_DIR = path.join(process.cwd(), "uploads", "logs");
+const METRICS_FILE = path.join(LOGS_DIR, "metrics.json");
+const LOG_RETENTION_DAYS = 7;
+
+// Compteurs de métriques (seront chargés depuis le fichier au démarrage)
+let metrics = {
+  requests: { total: 0, success: 0, errors: 0 },
+  uploads: { total: 0, success: 0, errors: 0, bytes: 0 },
+  downloads: { total: 0, bytes: 0 },
+  covers: { extracted: 0, fetched: 0, cached: 0, placeholders: 0 },
+  startTime: Date.now(),
+  lastSaved: Date.now(),
+};
+
+// Créer le dossier logs au démarrage (sync pour garantir qu'il existe)
+try {
+  if (!existsSync(LOGS_DIR)) {
+    mkdirSync(LOGS_DIR, { recursive: true });
+  }
+} catch (e) {
+  console.error("Failed to create logs directory:", e);
+}
+
+// Obtenir le chemin du fichier log du jour
+function getLogFilePath(date: Date = new Date()): string {
+  const dateStr = date.toISOString().split("T")[0]; // YYYY-MM-DD
+  return path.join(LOGS_DIR, `${dateStr}.jsonl`);
+}
+
+// Écrire un log dans le fichier (async, fire-and-forget)
+function persistLog(entry: LogEntry) {
+  const logFile = getLogFilePath();
+  const line = JSON.stringify(entry) + "\n";
+
+  // Fire-and-forget pour ne pas bloquer
+  appendFile(logFile, line).catch((err) => {
+    console.error("Failed to persist log:", err);
+  });
+}
+
+// Sauvegarder les métriques (appelé périodiquement)
+async function saveMetrics() {
+  try {
+    metrics.lastSaved = Date.now();
+    await writeFile(METRICS_FILE, JSON.stringify(metrics, null, 2));
+  } catch (err) {
+    console.error("Failed to save metrics:", err);
+  }
+}
+
+// Charger les métriques au démarrage
+async function loadMetrics() {
+  try {
+    if (existsSync(METRICS_FILE)) {
+      const data = await readFile(METRICS_FILE, "utf-8");
+      const saved = JSON.parse(data);
+      // Conserver les compteurs mais reset le startTime
+      metrics = {
+        ...saved,
+        startTime: Date.now(),
+      };
+      console.log("Metrics loaded from file");
+    }
+  } catch (err) {
+    console.error("Failed to load metrics:", err);
+  }
+}
+
+// Charger les logs du jour dans le buffer mémoire
+async function loadTodayLogs() {
+  try {
+    const logFile = getLogFilePath();
+    if (existsSync(logFile)) {
+      const data = await readFile(logFile, "utf-8");
+      const lines = data.trim().split("\n").filter(Boolean);
+
+      // Charger les derniers logs (max LOG_BUFFER_SIZE)
+      const recentLines = lines.slice(-LOG_BUFFER_SIZE);
+      for (const line of recentLines) {
+        try {
+          const entry = JSON.parse(line) as LogEntry;
+          addToLogBuffer(entry);
+        } catch {
+          // Ignorer les lignes mal formées
+        }
+      }
+      console.log(`Loaded ${recentLines.length} logs from today's file`);
+    }
+  } catch (err) {
+    console.error("Failed to load today's logs:", err);
+  }
+}
+
+// Nettoyer les vieux fichiers de logs
+async function cleanupOldLogs() {
+  try {
+    const files = await readdir(LOGS_DIR);
+    const now = Date.now();
+    const maxAge = LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+    for (const file of files) {
+      if (!file.endsWith(".jsonl")) continue;
+
+      const filePath = path.join(LOGS_DIR, file);
+      const stats = await stat(filePath);
+
+      if (now - stats.mtime.getTime() > maxAge) {
+        await unlink(filePath);
+        console.log(`Deleted old log file: ${file}`);
+      }
+    }
+  } catch (err) {
+    console.error("Failed to cleanup old logs:", err);
+  }
+}
+
+// Sauvegarder les métriques toutes les 5 minutes
+setInterval(() => {
+  saveMetrics();
+}, 5 * 60 * 1000);
+
+// Nettoyer les vieux logs une fois par jour
+setInterval(() => {
+  cleanupOldLogs();
+}, 24 * 60 * 60 * 1000);
+
+// Initialisation au démarrage
+(async () => {
+  await loadMetrics();
+  await loadTodayLogs();
+  await cleanupOldLogs();
+})();
+
+function addToLogBuffer(entry: LogEntry) {
+  if (logBuffer.length < LOG_BUFFER_SIZE) {
+    logBuffer.push(entry);
+  } else {
+    logBuffer[logBufferIndex] = entry;
+    logBufferIndex = (logBufferIndex + 1) % LOG_BUFFER_SIZE;
+  }
+}
+
+function getRecentLogs(count: number = 100, level?: LogLevel): LogEntry[] {
+  const logs = logBuffer.slice().sort((a, b) =>
+    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
+  if (level) {
+    return logs.filter(l => l.level === level).slice(0, count);
+  }
+  return logs.slice(0, count);
 }
 
 const log = {
@@ -47,6 +207,12 @@ const log = {
         stack: isProduction ? undefined : error.stack,
       };
     }
+
+    // Toujours ajouter au buffer en mémoire
+    addToLogBuffer(entry);
+
+    // Persister dans le fichier
+    persistLog(entry);
 
     if (isProduction) {
       // JSON output for log aggregators (e.g., CloudWatch, Datadog)
@@ -321,11 +487,17 @@ app.post("/api/upload/epub", async (c) => {
       .set({ storageUsed: sql`${user.storageUsed} + ${file.size}` })
       .where(eq(user.id, session.user.id));
 
+    // Métriques
+    metrics.uploads.success++;
+    metrics.uploads.bytes += file.size;
+    log.info("Upload success", { fileId, title, author, size: file.size, userId: session.user.id });
+
     return c.json({
       success: true,
       document: newDocument,
     });
   } catch (error) {
+    metrics.uploads.errors++;
     log.error("Upload error", error instanceof Error ? error : new Error(String(error)));
     return c.json({ error: "Upload failed" }, 500);
   }
@@ -503,6 +675,10 @@ app.get("/api/files/:fileId", async (c) => {
       return c.json({ error: "File not found on disk" }, 404);
     }
 
+    // Métriques
+    metrics.downloads.total++;
+    metrics.downloads.bytes += file.size;
+
     // Retourner le fichier avec les bons headers
     return new Response(file, {
       headers: {
@@ -562,6 +738,382 @@ app.get("/health", async (c) => {
     },
     responseTime: Date.now() - startTime + " ms",
   }, dbStatus === "ok" ? 200 : 503);
+});
+
+// ============================================
+// ADMIN ENDPOINTS - Stats, Logs, Storage
+// ============================================
+
+// Middleware pour vérifier l'accès admin
+async function requireAdmin(c: any, next: () => Promise<void>) {
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+
+  if (!session?.user) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const [userData] = await db.select({ role: user.role })
+    .from(user)
+    .where(eq(user.id, session.user.id))
+    .limit(1);
+
+  if (!userData || userData.role !== "ADMIN") {
+    return c.json({ error: "Admin access required" }, 403);
+  }
+
+  c.set("adminUser", session.user);
+  await next();
+}
+
+// Helper pour calculer la taille d'un dossier
+async function getDirectorySize(dirPath: string): Promise<{ totalSize: number; fileCount: number; files: Array<{ name: string; size: number; mtime: Date }> }> {
+  const result = { totalSize: 0, fileCount: 0, files: [] as Array<{ name: string; size: number; mtime: Date }> };
+
+  if (!existsSync(dirPath)) {
+    return result;
+  }
+
+  try {
+    const entries = await readdir(dirPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
+      if (entry.isFile()) {
+        const stats = await stat(fullPath);
+        result.totalSize += stats.size;
+        result.fileCount++;
+        result.files.push({ name: entry.name, size: stats.size, mtime: stats.mtime });
+      } else if (entry.isDirectory()) {
+        const subResult = await getDirectorySize(fullPath);
+        result.totalSize += subResult.totalSize;
+        result.fileCount += subResult.fileCount;
+        result.files.push(...subResult.files.map(f => ({ ...f, name: `${entry.name}/${f.name}` })));
+      }
+    }
+  } catch (err) {
+    log.error("Error reading directory", err instanceof Error ? err : new Error(String(err)), { dirPath });
+  }
+
+  return result;
+}
+
+// Endpoint: Stats globales du serveur
+app.get("/api/admin/stats", requireAdmin, async (c) => {
+  const startTime = Date.now();
+
+  try {
+    // Stats mémoire
+    const memoryUsage = process.memoryUsage();
+
+    // Stats stockage disque
+    const uploadsDir = path.join(process.cwd(), "uploads");
+    const diskStats = await getDirectorySize(uploadsDir);
+
+    // Compter les fichiers EPUB sur disque
+    const epubFiles = diskStats.files.filter(f => f.name.endsWith(".epub"));
+
+    // Stats base de données
+    const dbStatsResult = await db.execute(sql`
+      SELECT
+        (SELECT COUNT(*) FROM document) as total_documents,
+        (SELECT COUNT(*) FROM "user") as total_users,
+        (SELECT COUNT(*) FROM "group") as total_groups,
+        (SELECT COALESCE(SUM(CAST(filesize AS BIGINT)), 0) FROM document) as total_db_size
+    `);
+    const dbStats = dbStatsResult.rows[0] as Record<string, unknown> | undefined;
+
+    const totalDocumentsInDb = Number(dbStats?.total_documents) || 0;
+    const totalUsersInDb = Number(dbStats?.total_users) || 0;
+    const totalGroupsInDb = Number(dbStats?.total_groups) || 0;
+    const totalDbSize = Number(dbStats?.total_db_size) || 0;
+
+    // Détecter les orphelins
+    const documentsInDb = await db.select({ id: document.id, filepath: document.filepath }).from(document);
+    const dbFileIds = new Set(documentsInDb.map(d => d.id));
+
+    // Fichiers sur disque sans entrée DB
+    const orphanFiles = epubFiles.filter(f => {
+      const fileId = f.name.replace(".epub", "");
+      return !dbFileIds.has(fileId);
+    });
+
+    // Entrées DB sans fichier sur disque
+    const missingFiles: Array<{ id: string; filepath: string }> = [];
+    for (const doc of documentsInDb) {
+      const filePath = path.join(process.cwd(), doc.filepath);
+      if (!existsSync(filePath)) {
+        missingFiles.push({ id: doc.id, filepath: doc.filepath });
+      }
+    }
+
+    // Stats logs
+    const logStats = {
+      total: logBuffer.length,
+      errors: logBuffer.filter(l => l.level === "error").length,
+      warnings: logBuffer.filter(l => l.level === "warn").length,
+      lastError: logBuffer.filter(l => l.level === "error").sort((a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      )[0] || null,
+    };
+
+    return c.json({
+      timestamp: new Date().toISOString(),
+      responseTime: Date.now() - startTime,
+      uptime: process.uptime(),
+
+      memory: {
+        heapUsed: memoryUsage.heapUsed,
+        heapTotal: memoryUsage.heapTotal,
+        rss: memoryUsage.rss,
+        external: memoryUsage.external,
+        heapUsedMB: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+        rssMB: Math.round(memoryUsage.rss / 1024 / 1024),
+      },
+
+      storage: {
+        diskUsed: diskStats.totalSize,
+        diskUsedMB: Math.round(diskStats.totalSize / 1024 / 1024),
+        totalFilesOnDisk: epubFiles.length,
+        coversSize: diskStats.files.filter(f => f.name.startsWith("covers/")).reduce((acc, f) => acc + f.size, 0),
+        siteAssetsSize: diskStats.files.filter(f => f.name.startsWith("site/")).reduce((acc, f) => acc + f.size, 0),
+      },
+
+      database: {
+        totalDocuments: totalDocumentsInDb,
+        totalUsers: totalUsersInDb,
+        totalGroups: totalGroupsInDb,
+        reportedSize: totalDbSize,
+        reportedSizeMB: Math.round(totalDbSize / 1024 / 1024),
+      },
+
+      integrity: {
+        orphanFiles: orphanFiles.map(f => ({ name: f.name, size: f.size })),
+        orphanFilesCount: orphanFiles.length,
+        orphanFilesSize: orphanFiles.reduce((acc, f) => acc + f.size, 0),
+        missingFiles: missingFiles,
+        missingFilesCount: missingFiles.length,
+        isHealthy: orphanFiles.length === 0 && missingFiles.length === 0,
+      },
+
+      logs: logStats,
+
+      metrics: {
+        ...metrics,
+        uptimeSeconds: Math.round((Date.now() - metrics.startTime) / 1000),
+      },
+
+      rateLimiter: {
+        activeEntries: rateLimitStore.size,
+      },
+    });
+  } catch (error) {
+    log.error("Admin stats error", error instanceof Error ? error : new Error(String(error)));
+    return c.json({ error: "Failed to get stats" }, 500);
+  }
+});
+
+// Endpoint: Logs récents
+app.get("/api/admin/logs", requireAdmin, async (c) => {
+  const count = parseInt(c.req.query("count") || "100");
+  const level = c.req.query("level") as LogLevel | undefined;
+
+  const logs = getRecentLogs(Math.min(count, 500), level);
+
+  return c.json({
+    total: logBuffer.length,
+    returned: logs.length,
+    logs,
+  });
+});
+
+// Endpoint: Stats par utilisateur
+app.get("/api/admin/users-storage", requireAdmin, async (c) => {
+  try {
+    const usersWithStorage = await db.select({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      storageUsed: user.storageUsed,
+      storageQuota: user.storageQuota,
+      createdAt: user.createdAt,
+    }).from(user).orderBy(sql`${user.storageUsed} DESC NULLS LAST`);
+
+    // Compter les documents par utilisateur
+    const docCounts = await db.select({
+      ownerId: document.ownerId,
+      count: sql<number>`COUNT(*)`.as("count"),
+      totalSize: sql<number>`COALESCE(SUM(CAST(filesize AS BIGINT)), 0)`.as("totalSize"),
+    }).from(document).groupBy(document.ownerId);
+
+    const docCountMap = new Map(docCounts.map(d => [d.ownerId, { count: Number(d.count), totalSize: Number(d.totalSize) }]));
+
+    const result = usersWithStorage.map(u => ({
+      ...u,
+      storageUsed: Number(u.storageUsed) || 0,
+      storageQuota: Number(u.storageQuota) || 500 * 1024 * 1024,
+      documentCount: docCountMap.get(u.id)?.count || 0,
+      actualStorageUsed: docCountMap.get(u.id)?.totalSize || 0,
+      storageUsedMB: Math.round((Number(u.storageUsed) || 0) / 1024 / 1024),
+      quotaMB: Math.round((Number(u.storageQuota) || 500 * 1024 * 1024) / 1024 / 1024),
+      usagePercent: Math.round(((Number(u.storageUsed) || 0) / (Number(u.storageQuota) || 500 * 1024 * 1024)) * 100),
+    }));
+
+    return c.json({
+      total: result.length,
+      users: result,
+    });
+  } catch (error) {
+    log.error("Users storage error", error instanceof Error ? error : new Error(String(error)));
+    return c.json({ error: "Failed to get user storage" }, 500);
+  }
+});
+
+// Endpoint: Nettoyer les fichiers orphelins
+app.post("/api/admin/cleanup-orphans", requireAdmin, async (c) => {
+  try {
+    const uploadsDir = path.join(process.cwd(), "uploads");
+    const diskStats = await getDirectorySize(uploadsDir);
+    const epubFiles = diskStats.files.filter(f => f.name.endsWith(".epub") && !f.name.includes("/"));
+
+    const documentsInDb = await db.select({ id: document.id }).from(document);
+    const dbFileIds = new Set(documentsInDb.map(d => d.id));
+
+    const orphanFiles = epubFiles.filter(f => {
+      const fileId = f.name.replace(".epub", "");
+      return !dbFileIds.has(fileId);
+    });
+
+    const deleted: string[] = [];
+    const errors: string[] = [];
+
+    for (const orphan of orphanFiles) {
+      try {
+        const filePath = path.join(uploadsDir, orphan.name);
+        await unlink(filePath);
+        deleted.push(orphan.name);
+        log.info("Deleted orphan file", { file: orphan.name, size: orphan.size });
+      } catch (err) {
+        errors.push(orphan.name);
+        log.error("Failed to delete orphan", err instanceof Error ? err : new Error(String(err)), { file: orphan.name });
+      }
+    }
+
+    return c.json({
+      success: true,
+      deleted,
+      errors,
+      freedBytes: orphanFiles.filter(f => deleted.includes(f.name)).reduce((acc, f) => acc + f.size, 0),
+    });
+  } catch (error) {
+    log.error("Cleanup error", error instanceof Error ? error : new Error(String(error)));
+    return c.json({ error: "Cleanup failed" }, 500);
+  }
+});
+
+// Endpoint: Lister les fichiers de logs disponibles
+app.get("/api/admin/log-files", requireAdmin, async (c) => {
+  try {
+    if (!existsSync(LOGS_DIR)) {
+      return c.json({ files: [] });
+    }
+
+    const files = await readdir(LOGS_DIR);
+    const logFiles = [];
+
+    for (const file of files) {
+      if (!file.endsWith(".jsonl")) continue;
+
+      const filePath = path.join(LOGS_DIR, file);
+      const stats = await stat(filePath);
+      const date = file.replace(".jsonl", "");
+
+      // Compter les lignes (logs)
+      const content = await readFile(filePath, "utf-8");
+      const lineCount = content.trim().split("\n").filter(Boolean).length;
+
+      logFiles.push({
+        date,
+        filename: file,
+        size: stats.size,
+        lineCount,
+        isToday: date === new Date().toISOString().split("T")[0],
+      });
+    }
+
+    // Trier par date décroissante
+    logFiles.sort((a, b) => b.date.localeCompare(a.date));
+
+    return c.json({
+      files: logFiles,
+      retentionDays: LOG_RETENTION_DAYS,
+      logsDir: LOGS_DIR,
+    });
+  } catch (error) {
+    log.error("List log files error", error instanceof Error ? error : new Error(String(error)));
+    return c.json({ error: "Failed to list log files" }, 500);
+  }
+});
+
+// Endpoint: Lire les logs d'une date spécifique
+app.get("/api/admin/logs/:date", requireAdmin, async (c) => {
+  try {
+    const date = c.req.param("date");
+    const count = parseInt(c.req.query("count") || "100");
+    const level = c.req.query("level") as LogLevel | undefined;
+
+    // Valider le format de date
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return c.json({ error: "Invalid date format. Use YYYY-MM-DD" }, 400);
+    }
+
+    const logFile = path.join(LOGS_DIR, `${date}.jsonl`);
+
+    if (!existsSync(logFile)) {
+      return c.json({ error: "Log file not found for this date", logs: [] }, 404);
+    }
+
+    const content = await readFile(logFile, "utf-8");
+    const lines = content.trim().split("\n").filter(Boolean);
+
+    let logs: LogEntry[] = [];
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line) as LogEntry;
+        if (!level || entry.level === level) {
+          logs.push(entry);
+        }
+      } catch {
+        // Ignorer les lignes mal formées
+      }
+    }
+
+    // Trier par timestamp décroissant et limiter
+    logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    logs = logs.slice(0, Math.min(count, 500));
+
+    return c.json({
+      date,
+      total: lines.length,
+      returned: logs.length,
+      logs,
+    });
+  } catch (error) {
+    log.error("Read log file error", error instanceof Error ? error : new Error(String(error)));
+    return c.json({ error: "Failed to read log file" }, 500);
+  }
+});
+
+// Endpoint: Forcer la sauvegarde des métriques
+app.post("/api/admin/save-metrics", requireAdmin, async (c) => {
+  try {
+    await saveMetrics();
+    return c.json({ success: true, savedAt: new Date().toISOString() });
+  } catch (error) {
+    return c.json({ error: "Failed to save metrics" }, 500);
+  }
 });
 
 app.get("/", (c) => {

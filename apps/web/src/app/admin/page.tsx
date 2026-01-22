@@ -6,7 +6,9 @@ import {
   FileText,
   GraduationCap,
   TrendingUp,
-  Activity
+  Activity,
+  HardDrive,
+  Server
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -14,7 +16,44 @@ import { trpc } from "@/utils/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
 import Link from "next/link";
+
+const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3000";
+
+interface ServerStats {
+  storage: {
+    diskUsed: number;
+    diskUsedMB: number;
+    totalFilesOnDisk: number;
+  };
+  database: {
+    totalDocuments: number;
+    reportedSizeMB: number;
+  };
+  integrity: {
+    isHealthy: boolean;
+    orphanFilesCount: number;
+    missingFilesCount: number;
+  };
+}
+
+interface UserStorage {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  documentCount: number;
+  storageUsedMB: number;
+  quotaMB: number;
+  usagePercent: number;
+}
+
+async function fetchWithAuth(url: string) {
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
 
 function StatCard({
   title,
@@ -57,6 +96,17 @@ export default function AdminDashboardPage() {
     limit: 5,
     page: 1
   }));
+
+  const { data: serverStats, isLoading: serverStatsLoading } = useQuery<ServerStats>({
+    queryKey: ["admin-server-stats"],
+    queryFn: () => fetchWithAuth(`${SERVER_URL}/api/admin/stats`),
+    refetchInterval: 60000,
+  });
+
+  const { data: usersStorage, isLoading: usersStorageLoading } = useQuery<{ users: UserStorage[] }>({
+    queryKey: ["admin-users-storage"],
+    queryFn: () => fetchWithAuth(`${SERVER_URL}/api/admin/users-storage`),
+  });
 
   return (
     <div className="space-y-6">
@@ -150,8 +200,82 @@ export default function AdminDashboardPage() {
                   {stats?.activeSessions ?? 0}
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  utilisateurs connectés
+                  utilisateurs connectes
                 </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Stockage */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <HardDrive className="h-5 w-5" />
+              Stockage EPUB
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {serverStatsLoading ? (
+              <Skeleton className="h-20 w-full" />
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Espace utilise</span>
+                  <span className="text-2xl font-bold">{serverStats?.storage.diskUsedMB ?? 0} MB</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Fichiers sur disque</span>
+                  <Badge variant="secondary">{serverStats?.storage.totalFilesOnDisk ?? 0}</Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Documents en base</span>
+                  <Badge variant="secondary">{serverStats?.database.totalDocuments ?? 0}</Badge>
+                </div>
+                {serverStats && !serverStats.integrity.isHealthy && (
+                  <div className="mt-2 p-2 bg-yellow-50 dark:bg-yellow-950 rounded text-sm text-yellow-700 dark:text-yellow-300">
+                    {serverStats.integrity.orphanFilesCount} orphelins, {serverStats.integrity.missingFilesCount} manquants
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Server className="h-5 w-5" />
+              Stockage par utilisateur
+            </CardTitle>
+            <Link
+              href={"/admin/monitoring" as any}
+              className="text-sm text-primary hover:underline"
+            >
+              Details
+            </Link>
+          </CardHeader>
+          <CardContent>
+            {usersStorageLoading ? (
+              <Skeleton className="h-32 w-full" />
+            ) : (
+              <div className="space-y-3 max-h-48 overflow-auto">
+                {usersStorage?.users.slice(0, 5).map((user) => (
+                  <div key={user.id} className="space-y-1">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="truncate max-w-[150px]">{user.name}</span>
+                      <span className="font-mono text-xs">{user.storageUsedMB} MB</span>
+                    </div>
+                    <Progress value={user.usagePercent} className="h-1.5" />
+                  </div>
+                ))}
+                {(usersStorage?.users.length ?? 0) > 5 && (
+                  <p className="text-xs text-muted-foreground text-center">
+                    +{(usersStorage?.users.length ?? 0) - 5} autres utilisateurs
+                  </p>
+                )}
               </div>
             )}
           </CardContent>

@@ -9,7 +9,8 @@ import {
   FolderKanban,
   Activity,
   Settings,
-  ArrowLeft
+  ArrowLeft,
+  Server
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -55,6 +56,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         </div>
         <nav className="flex items-stretch overflow-x-auto gap-1 pb-2">
           <NavItem href="/admin" label="Vue d'ensemble" icon={<LayoutDashboard className="h-4 w-4" />} />
+          <NavItem href="/admin/monitoring" label="Système" icon={<Server className="h-4 w-4" />} />
           <NavItem href="/admin/users" label="Utilisateurs" icon={<Users className="h-4 w-4" />} />
           <NavItem href="/admin/teacher-requests" label="Demandes" icon={<GraduationCap className="h-4 w-4" />} />
           <NavItem href="/admin/groups" label="Groupes" icon={<FolderKanban className="h-4 w-4" />} />
@@ -82,6 +84,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
             <nav className="space-y-1">
               <NavItem href="/admin" label="Vue d'ensemble" icon={<LayoutDashboard className="h-4 w-4" />} />
+              <NavItem href="/admin/monitoring" label="Monitoring système" icon={<Server className="h-4 w-4" />} />
               <NavItem href="/admin/users" label="Utilisateurs" icon={<Users className="h-4 w-4" />} />
               <NavItem href="/admin/teacher-requests" label="Demandes enseignant" icon={<GraduationCap className="h-4 w-4" />} />
               <NavItem href="/admin/groups" label="Groupes" icon={<FolderKanban className="h-4 w-4" />} />
