@@ -829,8 +829,13 @@ app.get("/api/admin/stats", requireAdmin, async (c) => {
     const totalGroupsInDb = Number(dbStats?.total_groups) || 0;
     const totalDbSize = Number(dbStats?.total_db_size) || 0;
 
-    // Détecter les orphelins
-    const documentsInDb = await db.select({ id: document.id, filepath: document.filepath }).from(document);
+    // Détecter les orphelins - récupérer plus d'infos pour l'affichage
+    const documentsInDb = await db.select({
+      id: document.id,
+      filepath: document.filepath,
+      title: document.title,
+      ownerId: document.ownerId
+    }).from(document);
     const dbFileIds = new Set(documentsInDb.map(d => d.id));
 
     // Fichiers sur disque sans entrée DB
@@ -839,12 +844,24 @@ app.get("/api/admin/stats", requireAdmin, async (c) => {
       return !dbFileIds.has(fileId);
     });
 
-    // Entrées DB sans fichier sur disque
-    const missingFiles: Array<{ id: string; filepath: string }> = [];
+    // Entrées DB sans fichier sur disque - avec infos enrichies
+    const missingFiles: Array<{ id: string; filepath: string; title: string; ownerName: string; ownerEmail: string }> = [];
     for (const doc of documentsInDb) {
       const filePath = path.join(process.cwd(), doc.filepath);
       if (!existsSync(filePath)) {
-        missingFiles.push({ id: doc.id, filepath: doc.filepath });
+        // Récupérer le nom du propriétaire
+        const [owner] = await db.select({ name: user.name, email: user.email })
+          .from(user)
+          .where(eq(user.id, doc.ownerId))
+          .limit(1);
+
+        missingFiles.push({
+          id: doc.id,
+          filepath: doc.filepath,
+          title: doc.title,
+          ownerName: owner?.name || 'Utilisateur inconnu',
+          ownerEmail: owner?.email || ''
+        });
       }
     }
 
@@ -1013,6 +1030,59 @@ app.post("/api/admin/cleanup-orphans", requireAdmin, async (c) => {
   }
 });
 
+// Endpoint: Nettoyer les entrées DB sans fichiers (inverse des orphelins)
+app.post("/api/admin/cleanup-missing", requireAdmin, async (c) => {
+  try {
+    // Récupérer tous les documents de la DB
+    const documentsInDb = await db.select({
+      id: document.id,
+      filepath: document.filepath,
+      title: document.title
+    }).from(document);
+
+    const missing: Array<{ id: string; filepath: string; title: string }> = [];
+
+    // Vérifier quels documents n'ont plus de fichier sur le disque
+    for (const doc of documentsInDb) {
+      const filePath = path.join(process.cwd(), doc.filepath);
+      if (!existsSync(filePath)) {
+        missing.push({ id: doc.id, filepath: doc.filepath, title: doc.title });
+      }
+    }
+
+    const deleted: string[] = [];
+    const errors: string[] = [];
+
+    // Supprimer les entrées de la DB
+    for (const doc of missing) {
+      try {
+        await db.delete(document).where(eq(document.id, doc.id));
+        deleted.push(doc.id);
+        log.info("Deleted missing file entry from DB", {
+          id: doc.id,
+          title: doc.title,
+          filepath: doc.filepath
+        });
+      } catch (err) {
+        errors.push(doc.id);
+        log.error("Failed to delete missing entry", err instanceof Error ? err : new Error(String(err)), {
+          id: doc.id
+        });
+      }
+    }
+
+    return c.json({
+      success: true,
+      deleted,
+      errors,
+      deletedCount: deleted.length,
+    });
+  } catch (error) {
+    log.error("Cleanup missing files error", error instanceof Error ? error : new Error(String(error)));
+    return c.json({ error: "Cleanup missing files failed" }, 500);
+  }
+});
+
 // Endpoint: Lister les fichiers de logs disponibles
 app.get("/api/admin/log-files", requireAdmin, async (c) => {
   try {
@@ -1155,7 +1225,7 @@ async function fetchOpenLibraryCover(title: string, author: string | null, _file
   const cacheKey = getCoverCacheKey(title, author);
   const coverPath = `${COVERS_DIR}/${cacheKey}.jpg`;
   const noCoverPath = `${COVERS_DIR}/${cacheKey}.nocover`;
-  
+
   // 1. Vérifier le cache - cover déjà téléchargée
   const cachedCover = Bun.file(coverPath);
   if (await cachedCover.exists()) {
@@ -1166,13 +1236,13 @@ async function fetchOpenLibraryCover(title: string, author: string | null, _file
       },
     });
   }
-  
+
   // 2. Vérifier si déjà marqué "pas de cover"
   const noCoverMarker = Bun.file(noCoverPath);
   if (await noCoverMarker.exists()) {
     return generatePlaceholderSvg();
   }
-  
+
   // 3. Nettoyer titre et auteur pour la recherche
   const cleanTitle = title
     .replace(/\.epub$/i, "")
@@ -1181,51 +1251,51 @@ async function fetchOpenLibraryCover(title: string, author: string | null, _file
     .replace(/\[[^\]]*\]/g, "") // Enlever les crochets
     .replace(/\s+/g, " ")
     .trim();
-  
+
   const cleanAuthor = author
     ?.replace(/[_\-\.]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  
+
   // 4. Rechercher sur Open Library
   try {
     const query = encodeURIComponent(
       cleanAuthor ? `${cleanTitle} ${cleanAuthor}` : cleanTitle
     );
-    
+
     console.log(`📚 Open Library: "${cleanTitle}" by "${cleanAuthor || '?'}"`);
-    
+
     const searchRes = await fetchWithTimeout(
       `https://openlibrary.org/search.json?q=${query}&limit=5&fields=cover_i`,
       FETCH_TIMEOUT
     );
-    
+
     if (!searchRes.ok) throw new Error(`Search failed: ${searchRes.status}`);
-    
+
     const data = await searchRes.json() as { docs?: Array<{ cover_i?: number }> };
     const docWithCover = data.docs?.find(doc => doc.cover_i);
-    
+
     if (docWithCover?.cover_i) {
       // Télécharger la cover (taille M = medium)
       const coverRes = await fetchWithTimeout(
         `https://covers.openlibrary.org/b/id/${docWithCover.cover_i}-M.jpg`,
         FETCH_TIMEOUT
       );
-      
+
       if (coverRes.ok) {
         const rawBuffer = Buffer.from(await coverRes.arrayBuffer());
-        
+
         // Compresser et redimensionner avec sharp
         const optimizedBuffer = await sharp(rawBuffer)
           .resize(COVER_WIDTH, null, { withoutEnlargement: true })
           .jpeg({ quality: COVER_QUALITY, progressive: true })
           .toBuffer();
-        
+
         // Sauvegarder en cache
         await mkdir(COVERS_DIR, { recursive: true });
         await writeFile(coverPath, optimizedBuffer);
         console.log(`📚 Cover cached: ${cacheKey} (${Math.round(optimizedBuffer.length / 1024)}KB)`);
-        
+
         return new Response(optimizedBuffer, {
           headers: {
             "Content-Type": "image/jpeg",
@@ -1234,7 +1304,7 @@ async function fetchOpenLibraryCover(title: string, author: string | null, _file
         });
       }
     }
-    
+
     // Pas de cover trouvée - marquer pour éviter de refaire la requête
     await mkdir(COVERS_DIR, { recursive: true });
     await writeFile(noCoverPath, new Date().toISOString());
@@ -1243,7 +1313,7 @@ async function fetchOpenLibraryCover(title: string, author: string | null, _file
     // En cas d'erreur réseau, ne pas marquer .nocover (on réessaiera)
     console.error("📚 Open Library error:", error instanceof Error ? error.message : error);
   }
-  
+
   return generatePlaceholderSvg();
 }
 
@@ -1254,7 +1324,7 @@ function generatePlaceholderSvg() {
     <path d="M120 170 h60 M120 190 h50 M120 210 h40" stroke="#d4d4d4" stroke-width="2" stroke-linecap="round"/>
     <text x="150" y="320" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" fill="#a3a3a3">Pas de couverture</text>
   </svg>`;
-  
+
   return new Response(svg, {
     headers: {
       "Content-Type": "image/svg+xml",

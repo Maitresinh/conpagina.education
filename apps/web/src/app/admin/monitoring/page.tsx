@@ -82,7 +82,7 @@ interface ServerStats {
     orphanFiles: Array<{ name: string; size: number }>;
     orphanFilesCount: number;
     orphanFilesSize: number;
-    missingFiles: Array<{ id: string; filepath: string }>;
+    missingFiles: Array<{ id: string; filepath: string; title: string; ownerName: string; ownerEmail: string }>;
     missingFilesCount: number;
     isHealthy: boolean;
   };
@@ -177,6 +177,7 @@ export default function MonitoringPage() {
   const [logLevel, setLogLevel] = useState<string>("all");
   const [logCount, setLogCount] = useState<number>(50);
   const [cleanupDialogOpen, setCleanupDialogOpen] = useState(false);
+  const [cleanupMissingDialogOpen, setCleanupMissingDialogOpen] = useState(false);
   const [selectedLogDate, setSelectedLogDate] = useState<string>("today");
 
   const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useQuery<ServerStats>({
@@ -211,6 +212,13 @@ export default function MonitoringPage() {
 
   const cleanupMutation = useMutation({
     mutationFn: () => fetchWithAuth(`${SERVER_URL}/api/admin/cleanup-orphans`, { method: "POST" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-stats"] });
+    },
+  });
+
+  const cleanupMissingMutation = useMutation({
+    mutationFn: () => fetchWithAuth(`${SERVER_URL}/api/admin/cleanup-missing`, { method: "POST" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-stats"] });
     },
@@ -474,38 +482,76 @@ export default function MonitoringPage() {
                 </CardDescription>
               </div>
               {stats && !stats.integrity.isHealthy && (
-                <Dialog open={cleanupDialogOpen} onOpenChange={setCleanupDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button variant="destructive" size="sm">
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      Nettoyer les orphelins
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Confirmer le nettoyage</DialogTitle>
-                      <DialogDescription>
-                        Cette action va supprimer {stats.integrity.orphanFilesCount} fichier(s) orphelin(s)
-                        ({formatBytes(stats.integrity.orphanFilesSize)}) du disque.
-                        Cette action est irreversible.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setCleanupDialogOpen(false)}>
-                        Annuler
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        onClick={() => {
-                          cleanupMutation.mutate();
-                          setCleanupDialogOpen(false);
-                        }}
-                      >
-                        Supprimer
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
+                <div className="flex gap-2">
+                  {stats.integrity.orphanFilesCount > 0 && (
+                    <Dialog open={cleanupDialogOpen} onOpenChange={setCleanupDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button variant="destructive" size="sm">
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Nettoyer les orphelins
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Confirmer le nettoyage</DialogTitle>
+                          <DialogDescription>
+                            Cette action va supprimer {stats.integrity.orphanFilesCount} fichier(s) orphelin(s)
+                            ({formatBytes(stats.integrity.orphanFilesSize)}) du disque.
+                            Cette action est irreversible.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setCleanupDialogOpen(false)}>
+                            Annuler
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            onClick={() => {
+                              cleanupMutation.mutate();
+                              setCleanupDialogOpen(false);
+                            }}
+                          >
+                            Supprimer
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  )}
+                  {stats.integrity.missingFilesCount > 0 && (
+                    <Dialog open={cleanupMissingDialogOpen} onOpenChange={setCleanupMissingDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button variant="destructive" size="sm">
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Nettoyer les manquants
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Confirmer le nettoyage</DialogTitle>
+                          <DialogDescription>
+                            Cette action va supprimer {stats.integrity.missingFilesCount} entree(s) de la base de donnees
+                            dont les fichiers n'existent plus sur le disque.
+                            Cette action est irreversible.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setCleanupMissingDialogOpen(false)}>
+                            Annuler
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            onClick={() => {
+                              cleanupMissingMutation.mutate();
+                              setCleanupMissingDialogOpen(false);
+                            }}
+                          >
+                            Supprimer
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  )}
+                </div>
               )}
             </CardHeader>
             <CardContent>
@@ -549,10 +595,16 @@ export default function MonitoringPage() {
                       <p className="text-sm text-muted-foreground mb-2">
                         Entrees en base de donnees sans fichier sur le disque
                       </p>
-                      <div className="text-xs font-mono bg-muted p-2 rounded max-h-32 overflow-auto">
+                      <div className="text-xs bg-muted p-3 rounded max-h-48 overflow-auto space-y-2">
                         {stats!.integrity.missingFiles.map((f) => (
-                          <div key={f.id}>
-                            {f.id}: {f.filepath}
+                          <div key={f.id} className="border-b border-border pb-2 last:border-b-0">
+                            <div className="font-semibold text-foreground">{f.title}</div>
+                            <div className="text-muted-foreground mt-1">
+                              Uploadé par: {f.ownerName} ({f.ownerEmail})
+                            </div>
+                            <div className="text-muted-foreground text-[10px] font-mono mt-1">
+                              {f.filepath}
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -643,8 +695,8 @@ export default function MonitoringPage() {
                                 log.level === "error"
                                   ? "destructive"
                                   : log.level === "warn"
-                                  ? "default"
-                                  : "secondary"
+                                    ? "default"
+                                    : "secondary"
                               }
                             >
                               {log.level}
@@ -712,8 +764,8 @@ export default function MonitoringPage() {
                                 user.role === "ADMIN"
                                   ? "destructive"
                                   : user.role === "TEACHER"
-                                  ? "default"
-                                  : "secondary"
+                                    ? "default"
+                                    : "secondary"
                               }
                             >
                               {user.role}
