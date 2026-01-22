@@ -447,7 +447,12 @@ export const documentsRouter = router({
           ...(groupIds.length > 0 ? groupIds.map((gid) => eq(document.groupId, gid)) : [])
         )
       )
-      .orderBy(desc(document.createdAt));
+      // Trier par dernière lecture (les plus récemment lus en premier)
+      // Les livres jamais lus (null) sont placés à la fin, triés par date de création
+      .orderBy(
+        sql`${readingProgress.lastReadAt} DESC NULLS LAST`,
+        desc(document.createdAt)
+      );
 
     // Retourner tous les livres sans déduplication
     // Chaque instance (personnel, groupe, club) doit être visible séparément
