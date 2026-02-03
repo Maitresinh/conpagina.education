@@ -735,7 +735,7 @@ export function GroupDetail() {
                                     <Skeleton className="h-16 w-full" />
                                     <Skeleton className="h-16 w-full" />
                                 </div>
-                            ) : publicBooks && publicBooks.length === 0 ? (
+                            ) : publicBooks && publicBooks.books.length === 0 ? (
                                 <div className="py-8 text-center text-sm text-muted-foreground">
                                     <Globe className="h-12 w-12 mx-auto mb-4 opacity-50" />
                                     {debouncedPublicSearch ? (
@@ -746,7 +746,7 @@ export function GroupDetail() {
                                 </div>
                             ) : (
                                 <div className="grid gap-2">
-                                    {publicBooks?.map((book: any) => {
+                                    {publicBooks?.books?.map((book: any) => {
                                         const isSelected = selectedBooks.includes(book.id);
                                         return (
                                             <div
@@ -803,7 +803,7 @@ export function GroupDetail() {
                                 onClick={() => {
                                     // Determine which import function to use based on the current tab
                                     // Check if any selected book is from public library
-                                    const isPublicImport = publicBooks?.some((b: any) => selectedBooks.includes(b.id));
+                                    const isPublicImport = publicBooks?.books?.some((b: any) => selectedBooks.includes(b.id));
                                     if (isPublicImport) {
                                         handleImportPublicBooks();
                                     } else {
