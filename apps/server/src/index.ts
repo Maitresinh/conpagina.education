@@ -2,6 +2,7 @@ import "dotenv/config";
 import { trpcServer } from "@hono/trpc-server";
 import { createContext } from "@lectio/api/context";
 import { appRouter } from "@lectio/api/routers/index";
+import { startCommentAlertWorker } from "@lectio/api/lib/comment-alerts";
 import { auth } from "@lectio/auth";
 import { db, document, groupMember, user, eq, and, sql } from "@lectio/db";
 import { Hono } from "hono";
@@ -1487,6 +1488,7 @@ app.get("/api/cover/:fileId", async (c) => {
 });
 
 // Startup log
+startCommentAlertWorker();
 log.info("Server starting", { port: 3000, env: process.env.NODE_ENV || "development" });
 
 export default {

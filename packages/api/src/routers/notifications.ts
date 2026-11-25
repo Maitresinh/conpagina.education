@@ -7,13 +7,37 @@ import {
   user,
   groupAccessRequest,
   notification,
+  commentAlertPreference,
+  commentAlertDelivery,
   eq,
   and,
   desc
 } from "@lectio/db";
 import { protectedProcedure, router } from "../index";
+import { defaultAlertPreferences } from "../lib/alert-content";
 
 export const notificationsRouter = router({
+  getPreferences: protectedProcedure.query(async ({ ctx }) => {
+    const [saved] = await db.select().from(commentAlertPreference).where(eq(commentAlertPreference.userId, ctx.session.user.id));
+    const [latest] = await db.select({ status: commentAlertDelivery.status, sentAt: commentAlertDelivery.sentAt, lastError: commentAlertDelivery.lastError })
+      .from(commentAlertDelivery).where(eq(commentAlertDelivery.userId, ctx.session.user.id))
+      .orderBy(desc(commentAlertDelivery.createdAt)).limit(1);
+    return { preferences: saved || defaultAlertPreferences,
+      email: ctx.session.user.email, serviceEnabled: process.env.COMMENT_ALERTS_ENABLED === "true" && !!process.env.RESEND_API_KEY && !!process.env.EMAIL_FROM,
+      latestDelivery: latest || null };
+  }),
+  updatePreferences: protectedProcedure.input(z.object({
+    emailFrequency: z.enum(["off", "immediate", "daily"]),
+    newComments: z.boolean(), replies: z.boolean(), groupIds: z.array(z.string()).max(200),
+  })).mutation(async ({ ctx, input }) => {
+    const memberships = await db.select({ id: groupMember.groupId }).from(groupMember).where(eq(groupMember.userId, ctx.session.user.id));
+    const allowed = new Set(memberships.map(m => m.id));
+    if (input.groupIds.some(id => !allowed.has(id))) throw new TRPCError({ code: "FORBIDDEN", message: "Classe inaccessible" });
+    const values = { ...input, groupIds: [...new Set(input.groupIds)], updatedAt: new Date() };
+    await db.insert(commentAlertPreference).values({ userId: ctx.session.user.id, ...values })
+      .onConflictDoUpdate({ target: commentAlertPreference.userId, set: values });
+    return { success: true };
+  }),
   // Demander l'accès à un groupe
   requestGroupAccess: protectedProcedure
     .input(

@@ -20,6 +20,7 @@
   },
   "type": "module",
   "scripts": {
+    "test:comment-alerts": "bun test packages/db/tests/comment-alerts.test.ts",
     "dev": "turbo dev",
     "build": "turbo build",
     "check-types": "turbo check-types",
@@ -39,6 +40,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.6.0",
     "@react-email/preview-server": "^5.2.5",
     "@types/bun": "catalog:",
     "turbo": "^2.6.3",

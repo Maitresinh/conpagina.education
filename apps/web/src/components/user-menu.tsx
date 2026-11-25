@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Shield, GraduationCap, LogOut, User } from "lucide-react";
+import { Shield, GraduationCap, LogOut, User, Bell } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
@@ -63,6 +63,9 @@ export default function UserMenu() {
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => router.push("/dashboard/notifications" as any)}>
+            <Bell className="h-4 w-4 mr-2" /> Alertes de lecture
+          </DropdownMenuItem>
           
           {role === "ADMIN" && (
             <>

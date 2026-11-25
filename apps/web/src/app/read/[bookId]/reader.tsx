@@ -17,7 +17,7 @@ import { useReaderContext } from "@/contexts/reader-context";
 import { toast } from "sonner";
 import "../annotations.css";
 
-export default function Reader({ bookId }: { bookId: string }) {
+export default function Reader({ bookId, initialAnnotationId }: { bookId: string; initialAnnotationId?: string }) {
   const router = useRouter();
   const renditionRef = useRef<any>(null);
   const {
@@ -57,6 +57,7 @@ export default function Reader({ bookId }: { bookId: string }) {
   // Annotations panel state
   const [showAnnotationsPanel, setShowAnnotationsPanel] = useState(false);
   const [focusedAnnotationId, setFocusedAnnotationId] = useState<string | null>(null);
+  const openedEmailThread = useRef<string | null>(null);
 
   // State to track when rendition is ready
   const [renditionReady, setRenditionReady] = useState(false);
@@ -91,6 +92,15 @@ export default function Reader({ bookId }: { bookId: string }) {
     bookId,
     userId
   });
+
+  useEffect(() => {
+    const key = `${bookId}:${initialAnnotationId}`;
+    if (initialAnnotationId && openedEmailThread.current !== key && annotations.some(a => a.id === initialAnnotationId)) {
+      openedEmailThread.current = key;
+      setFocusedAnnotationId(initialAnnotationId);
+      setShowAnnotationsPanel(true);
+    }
+  }, [bookId, initialAnnotationId, annotations]);
 
   const { data: bookData, isLoading, error } = useQuery(
     trpc.documents.getBook.queryOptions({ id: bookId })

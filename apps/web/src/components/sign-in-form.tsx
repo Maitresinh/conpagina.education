@@ -47,10 +47,10 @@ export default function SignInForm({ onSwitchToSignUp }: { onSwitchToSignUp: () 
           onSuccess: () => {
             // Vérifier s'il y a une redirection stockée
             const redirectUrl = typeof window !== "undefined"
-              ? sessionStorage.getItem("redirectAfterLogin")
+              ? new URLSearchParams(window.location.search).get("next") || sessionStorage.getItem("redirectAfterLogin")
               : null;
 
-            if (redirectUrl) {
+            if (redirectUrl && redirectUrl.startsWith("/") && !redirectUrl.startsWith("//") && !redirectUrl.includes("\\")) {
               sessionStorage.removeItem("redirectAfterLogin");
               router.push(redirectUrl as any);
             } else {
