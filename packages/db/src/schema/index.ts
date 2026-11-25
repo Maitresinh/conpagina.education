@@ -4,5 +4,6 @@ export * from "./documents";
 export * from "./reading";
 export * from "./sharing";
 export * from "./notifications";
+export * from "./comment-alerts";
 export * from "./admin";
 export {};

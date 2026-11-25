@@ -41,6 +41,7 @@ services:
       - POLAR_ORGANIZATION_ID=${POLAR_ORGANIZATION_ID:-}
       - RESEND_API_KEY=${RESEND_API_KEY:-}
       - EMAIL_FROM=${EMAIL_FROM:-}
+      - COMMENT_ALERTS_ENABLED=${COMMENT_ALERTS_ENABLED:-false}
       - CORS_ORIGIN=${NEXT_PUBLIC_APP_URL}
     volumes:
       - uploads_data:/app/apps/server/uploads

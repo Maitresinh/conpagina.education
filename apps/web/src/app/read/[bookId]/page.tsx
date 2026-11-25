@@ -4,9 +4,10 @@ import { authClient } from "@/lib/auth-client";
 import Reader from "./reader";
 
 export default async function ReadPage({ 
-  params 
+  params, searchParams
 }: { 
-  params: Promise<{ bookId: string }> 
+  params: Promise<{ bookId: string }>;
+  searchParams: Promise<{ annotation?: string }>;
 }) {
   const session = await authClient.getSession({
     fetchOptions: {
@@ -15,12 +16,14 @@ export default async function ReadPage({
     },
   });
 
+  const { bookId } = await params;
+  const { annotation } = await searchParams;
+  const threadId = typeof annotation === "string" ? annotation : undefined;
   if (!session?.user) {
-    redirect("/login");
+    const destination = `/read/${encodeURIComponent(bookId)}${threadId ? `?annotation=${encodeURIComponent(threadId)}` : ""}`;
+    redirect(`/login?next=${encodeURIComponent(destination)}`);
   }
 
-  const { bookId } = await params;
-
-  return <Reader bookId={bookId} />;
+  return <Reader bookId={bookId} initialAnnotationId={threadId} />;
 }
 

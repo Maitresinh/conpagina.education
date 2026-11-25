@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { trpc } from "@/utils/trpc";
 import { authClient } from "@/lib/auth-client";
@@ -15,8 +16,6 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { formatDistanceToNow } from "date-fns";
-import { fr } from "date-fns/locale";
 
 const serverUrl = process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3000";
 
@@ -39,12 +38,14 @@ export function NotificationBell() {
   const { data: unreadData } = useQuery({
     ...trpc.notifications.getUnreadCount.queryOptions(),
     enabled: isLoggedIn,
+    refetchInterval: 30000,
   });
 
   // Récupérer les notifications (pour tous les utilisateurs connectés et panel ouvert)
   const { data: notifications, isLoading } = useQuery({
     ...trpc.notifications.getMyNotifications.queryOptions({ limit: 10 }),
     enabled: isLoggedIn && isOpen,
+    refetchInterval: isOpen ? 30000 : false,
   });
 
   // Mutation pour marquer comme lu
@@ -240,11 +241,14 @@ export function NotificationBell() {
                                 const offsetMs = now.getTimezoneOffset() * 60 * 1000;
                                 date = new Date(date.getTime() + offsetMs);
                               }
-                              return formatDistanceToNow(date, { addSuffix: true, locale: fr });
+                              return date.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
                             })()}
                           </p>
 
                           {/* Boutons d'action pour les demandes d'accès */}
+                          {notif.type === "new_annotation" && notif.actionUrl?.startsWith("/read/") && (
+                            <Link href={notif.actionUrl as any} className="mt-2 inline-flex rounded bg-indigo-700 px-3 py-2 text-sm text-white" onClick={() => setIsOpen(false)}>↩ Répondre</Link>
+                          )}
                           {notif.type === "access_request" && notif.resourceId && (
                             <div className="flex gap-2 mt-2">
                               <Button

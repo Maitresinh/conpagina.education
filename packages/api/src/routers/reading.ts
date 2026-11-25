@@ -17,6 +17,7 @@ import {
 } from "@lectio/db";
 import { protectedProcedure, router } from "../index";
 import { randomUUID } from "crypto";
+import { enqueueCommentAlerts } from "../lib/comment-alerts";
 
 async function assertCanAccessDocument(params: {
   documentId: string;
@@ -182,16 +183,19 @@ export const readingRouter = router({
       await assertGroupNotArchived(input.documentId);
 
       const id = randomUUID();
-      await db.insert(annotation).values({
-        id,
-        userId: ctx.session.user.id,
-        documentId: input.documentId,
-        isGroupVisible: doc.groupId ? "true" : "false",
-        cfiRange: input.cfiRange,
-        selectedText: input.selectedText,
-        highlightColor: input.highlightColor,
-        comment: input.comment,
-        context: input.context as any,
+      await db.transaction(async tx => {
+        await tx.insert(annotation).values({
+          id,
+          userId: ctx.session.user.id,
+          documentId: input.documentId,
+          isGroupVisible: doc.groupId ? "true" : "false",
+          cfiRange: input.cfiRange,
+          selectedText: input.selectedText,
+          highlightColor: input.highlightColor,
+          comment: input.comment,
+          context: input.context as any,
+        });
+        await enqueueCommentAlerts(tx, id);
       });
 
       return { success: true, id };
@@ -344,14 +348,17 @@ export const readingRouter = router({
       // Vérifier si le groupe est archivé
       await assertGroupNotArchived(annot.documentId);
 
-      await db
-        .update(annotation)
-        .set({
-          highlightColor: input.highlightColor,
-          comment: input.comment,
-          updatedAt: new Date(),
-        })
-        .where(eq(annotation.id, input.id));
+      await db.transaction(async tx => {
+        await tx
+          .update(annotation)
+          .set({
+            highlightColor: input.highlightColor,
+            comment: input.comment,
+            updatedAt: new Date(),
+          })
+          .where(eq(annotation.id, input.id));
+        if (!annot.comment?.trim() && input.comment?.trim()) await enqueueCommentAlerts(tx, input.id);
+      });
 
       return { success: true };
     }),
@@ -451,6 +458,11 @@ export const readingRouter = router({
         });
       }
 
+      if (parent.documentId !== input.documentId || parent.parentId ||
+          (parent.isGroupVisible !== "true" && parent.userId !== ctx.session.user.id)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Cette discussion n'est pas accessible." });
+      }
+
       // Vérifier l'accès au document
       await assertCanAccessDocument({ documentId: input.documentId, userId: ctx.session.user.id });
 
@@ -458,17 +470,20 @@ export const readingRouter = router({
       await assertGroupNotArchived(input.documentId);
 
       const id = randomUUID();
-      await db.insert(annotation).values({
-        id,
-        userId: ctx.session.user.id,
-        documentId: input.documentId,
-        parentId: input.parentId,
-        isGroupVisible: parent.isGroupVisible, // Hérite de la visibilité du parent
-        cfiRange: parent.cfiRange, // Même position
-        selectedText: parent.selectedText,
-        highlightColor: parent.highlightColor,
-        comment: input.comment,
-        context: parent.context as any,
+      await db.transaction(async tx => {
+        await tx.insert(annotation).values({
+          id,
+          userId: ctx.session.user.id,
+          documentId: input.documentId,
+          parentId: input.parentId,
+          isGroupVisible: parent.isGroupVisible, // Hérite de la visibilité du parent
+          cfiRange: parent.cfiRange, // Même position
+          selectedText: parent.selectedText,
+          highlightColor: parent.highlightColor,
+          comment: input.comment,
+          context: parent.context as any,
+        });
+        await enqueueCommentAlerts(tx, id);
       });
 
       return { success: true, id };
@@ -478,6 +493,12 @@ export const readingRouter = router({
   getAnnotationReplies: protectedProcedure
     .input(z.object({ annotationId: z.string() }))
     .query(async ({ ctx, input }) => {
+      const [parent] = await db.select().from(annotation).where(eq(annotation.id, input.annotationId)).limit(1);
+      if (!parent) throw new TRPCError({ code: "NOT_FOUND" });
+      await assertCanAccessDocument({ documentId: parent.documentId, userId: ctx.session.user.id });
+      if (parent.isGroupVisible !== "true" && parent.userId !== ctx.session.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
       const rows = await db
         .select({
           annotation: annotation,

@@ -1,5 +1,7 @@
 "use client";
 
+import { DOCUMENT_ACCEPT, isReadingDocument } from "@/lib/document-upload";
+
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -73,7 +75,7 @@ export default function PublicLibraryPage() {
     formData.append("file", file);
     formData.append("isPublic", "true");
 
-    const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/api/upload/epub`, {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/api/upload/document`, {
       method: "POST",
       credentials: "include",
       body: formData,
@@ -219,7 +221,7 @@ export default function PublicLibraryPage() {
     const invalidFiles: string[] = [];
 
     for (const file of fileArray) {
-      if (file.type === "application/epub+zip" || file.name.endsWith(".epub")) {
+      if (isReadingDocument(file)) {
         validFiles.push(file);
       } else {
         invalidFiles.push(file.name);
@@ -227,7 +229,7 @@ export default function PublicLibraryPage() {
     }
 
     if (invalidFiles.length > 0) {
-      toast.error(`Fichiers non-EPUB ignorés: ${invalidFiles.join(', ')}`);
+      toast.error(`Formats non pris en charge (EPUB ou PDF attendus) : ${invalidFiles.join(', ')}`);
     }
 
     if (validFiles.length > 0) {
@@ -411,7 +413,7 @@ export default function PublicLibraryPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".epub,application/epub+zip"
+                accept={DOCUMENT_ACCEPT}
                 onChange={handleFileSelect}
                 className="hidden"
                 id="public-book-upload"
@@ -431,12 +433,12 @@ export default function PublicLibraryPage() {
                 ) : (
                   <>
                     <Upload className="h-4 w-4" />
-                    Sélectionner des fichiers EPUB
+                    Sélectionner des fichiers EPUB ou PDF
                   </>
                 )}
               </Button>
               <p className="text-xs text-muted-foreground text-center">
-                Seuls les fichiers EPUB sont acceptés. Vous pouvez en sélectionner plusieurs (max 20).
+                Seuls les fichiers EPUB et PDF sont acceptés. Vous pouvez en sélectionner plusieurs (max 20).
               </p>
             </TabsContent>
 

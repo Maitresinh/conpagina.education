@@ -12,16 +12,12 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # Copier tout le projet
 COPY . .
 
-# Supprimer le lockfile et la config bun pour éviter les conflits et forcer une installation propre
-RUN rm -f bun.lock bunfig.toml
-
-# Installer les dépendances
-RUN bun install --verbose
+# Installer les versions validées, sans recalculer les dépendances en production.
+RUN bun install --frozen-lockfile
 
 # Build du serveur (pour générer les types et vérifier que tout est là)
 WORKDIR /app/apps/server
 # On ne build pas vraiment car on utilise ts-node/bun run, mais on s'assure que les deps sont là
-RUN bun install --verbose
 
 # Build du web
 ARG NEXT_PUBLIC_SERVER_URL=http://localhost:3000
@@ -64,6 +60,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/apps/web/node_modules ./apps/web/node_modules
 
 COPY --from=builder /app/apps/web/.next ./apps/web/.next
+COPY --from=builder /app/apps/web/public ./apps/web/public
 COPY --from=builder /app/apps/web/package.json ./apps/web/
 COPY --from=builder /app/apps/web/next.config.ts ./apps/web/
 COPY --from=builder /app/packages ./packages

@@ -1,5 +1,7 @@
 "use client";
 
+import { DOCUMENT_ACCEPT, isReadingDocument } from "@/lib/document-upload";
+
 import Link from "next/link";
 import { useState } from "react";
 import { useParams, useRouter, usePathname } from "next/navigation";
@@ -136,7 +138,7 @@ export function GroupDetail() {
             formData.append("file", file);
             formData.append("groupId", gid);
 
-            const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/api/upload/epub`, {
+            const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/api/upload/document`, {
                 method: "POST",
                 credentials: "include",
                 body: formData,
@@ -485,14 +487,14 @@ export function GroupDetail() {
             {canManage && (
                 <input
                     type="file"
-                    accept=".epub,application/epub+zip"
+                    accept={DOCUMENT_ACCEPT}
                     className="hidden"
                     id="group-book-upload"
                     onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (!file) return;
-                        if (file.type !== "application/epub+zip" && !file.name.endsWith(".epub")) {
-                            toast.error("Seuls les fichiers EPUB sont acceptés");
+                        if (!isReadingDocument(file)) {
+                            toast.error("Seuls les fichiers EPUB et PDF sont acceptés");
                             return;
                         }
                         uploadBookToGroup.mutate({ file, groupId });

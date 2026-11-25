@@ -71,6 +71,13 @@
       "when": 1767915780376,
       "tag": "0009_lumpy_old_lace",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795622704373,
+      "tag": "0010_comment_alerts",
+      "breakpoints": true
     }
   ]
 }

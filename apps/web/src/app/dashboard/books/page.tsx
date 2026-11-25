@@ -1,5 +1,7 @@
 "use client";
 
+import { DOCUMENT_ACCEPT, isReadingDocument } from "@/lib/document-upload";
+
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -45,7 +47,7 @@ export default function DashboardBooksPage() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/api/upload/epub`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/api/upload/document`, {
         method: "POST",
         credentials: "include",
         body: formData,
@@ -99,8 +101,8 @@ export default function DashboardBooksPage() {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.type !== "application/epub+zip" && !file.name.endsWith(".epub")) {
-        toast.error("Seuls les fichiers EPUB sont acceptés");
+      if (!isReadingDocument(file)) {
+        toast.error("Seuls les fichiers EPUB et PDF sont acceptés");
         return;
       }
       setIsUploading(true);
@@ -131,7 +133,7 @@ export default function DashboardBooksPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".epub,application/epub+zip"
+                accept={DOCUMENT_ACCEPT}
                 onChange={handleFileSelect}
                 className="hidden"
                 id="book-upload-dashboard"

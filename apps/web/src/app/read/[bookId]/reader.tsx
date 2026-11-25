@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -17,7 +18,9 @@ import { useReaderContext } from "@/contexts/reader-context";
 import { toast } from "sonner";
 import "../annotations.css";
 
-export default function Reader({ bookId }: { bookId: string }) {
+const PdfReader = dynamic(() => import("@/components/pdf-reader"), { ssr: false, loading: () => <p className="p-6">Chargement du lecteur PDF…</p> });
+
+export default function Reader({ bookId, initialAnnotationId }: { bookId: string; initialAnnotationId?: string }) {
   const router = useRouter();
   const renditionRef = useRef<any>(null);
   const {
@@ -57,6 +60,8 @@ export default function Reader({ bookId }: { bookId: string }) {
   // Annotations panel state
   const [showAnnotationsPanel, setShowAnnotationsPanel] = useState(false);
   const [focusedAnnotationId, setFocusedAnnotationId] = useState<string | null>(null);
+  const openedEmailThread = useRef<string | null>(null);
+  const navigatedEmailThread = useRef<string | null>(null);
 
   // State to track when rendition is ready
   const [renditionReady, setRenditionReady] = useState(false);
@@ -92,6 +97,15 @@ export default function Reader({ bookId }: { bookId: string }) {
     userId
   });
 
+  useEffect(() => {
+    const key = `${bookId}:${initialAnnotationId}`;
+    if (initialAnnotationId && openedEmailThread.current !== key && annotations.some(a => a.id === initialAnnotationId)) {
+      openedEmailThread.current = key;
+      setFocusedAnnotationId(initialAnnotationId);
+      setShowAnnotationsPanel(true);
+    }
+  }, [bookId, initialAnnotationId, annotations]);
+
   const { data: bookData, isLoading, error } = useQuery(
     trpc.documents.getBook.queryOptions({ id: bookId })
   );
@@ -106,7 +120,7 @@ export default function Reader({ bookId }: { bookId: string }) {
 
   const isReadOnly = (archiveStatus as any)?.isReadOnly || archiveStatus?.isArchived || false;
 
-  const { data: progress } = useQuery(
+  const { data: progress, isPending: progressPending } = useQuery(
     trpc.reading.getProgress.queryOptions(
       { documentId: bookId },
       { enabled: !!bookData }
@@ -116,6 +130,18 @@ export default function Reader({ bookId }: { bookId: string }) {
   const saveProgressMutation = useMutation(
     trpc.reading.saveProgress.mutationOptions()
   );
+
+  const isPdf = bookData?.mimeType === "application/pdf";
+
+  useEffect(() => {
+    if (renditionReady && initialAnnotationId && navigatedEmailThread.current !== initialAnnotationId) {
+      const annotation = annotations.find(a => a.id === initialAnnotationId);
+      if (annotation) {
+        renditionRef.current?.display(annotation.cfiRange);
+        navigatedEmailThread.current = initialAnnotationId;
+      }
+    }
+  }, [renditionReady, initialAnnotationId, annotations]);
 
   // Highlight creation
   const handleTextSelect = (cfiRange: string, text: string, rect: DOMRect) => {
@@ -317,6 +343,7 @@ export default function Reader({ bookId }: { bookId: string }) {
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.closest("input, textarea, select, [contenteditable=true]")) return;
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         handlePrev();
@@ -361,6 +388,14 @@ export default function Reader({ bookId }: { bookId: string }) {
     const interval = setInterval(() => saveProgressRef.current(), 30000);
     return () => clearInterval(interval);
   }, [bookId, locationsReady]); // Stable deps
+
+  // PDF page changes are small, discrete progress updates. Save them promptly.
+  useEffect(() => {
+    if (!isPdf || !currentLocation || !locationsReady) return;
+    setShowHighlightToolbar(false);
+    const timeout = setTimeout(() => saveProgressRef.current(), 500);
+    return () => clearTimeout(timeout);
+  }, [isPdf, currentLocation, locationsReady]);
 
   // Initialize progress from saved data
   useEffect(() => {
@@ -456,7 +491,7 @@ export default function Reader({ bookId }: { bookId: string }) {
               </span>
             )}
           </Button>
-          <ReaderSettings />
+          {!isPdf && <ReaderSettings />}
         </div>
       </div>
 
@@ -466,7 +501,18 @@ export default function Reader({ bookId }: { bookId: string }) {
           }`}
       >
         <div className="flex-1 relative overflow-hidden bg-white dark:bg-black">
-          <EpubReader
+          {isPdf ? (progressPending ? <p className="p-6">Chargement de la progression…</p> : <PdfReader
+            key={bookId}
+            url={url}
+            initialLocation={progress?.currentLocation}
+            annotations={annotations}
+            isReadOnly={isReadOnly}
+            onTextSelect={handleTextSelect}
+            onAnnotationClick={handleAnnotationClick}
+            onLocationChange={handleLocationChange}
+            getRendition={r => { renditionRef.current = r; setRenditionReady(true); }}
+            onLocationsReady={() => setLocationsReady(true)}
+          />) : <EpubReader
             url={url}
             height="100%"
             initialLocation={currentLocationForReload || progress?.currentLocation}
@@ -497,19 +543,19 @@ export default function Reader({ bookId }: { bookId: string }) {
               }, 500);
             }}
             onLocationsReady={() => setLocationsReady(true)}
-          />
+          />}
         </div>
       </div>
 
       {/* Chapter Progress Bar */}
-      <ChapterProgressBar
+      {!isPdf && <ChapterProgressBar
         toc={toc}
         rendition={renditionRef.current}
         currentProgressPercentage={currentProgressPercentage}
         onProgressChange={(percentage) => {
           setCurrentProgressPercentage(percentage);
         }}
-      />
+      />}
 
       {showHighlightToolbar && (
         <HighlightToolbar
