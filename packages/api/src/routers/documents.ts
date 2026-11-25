@@ -1,7 +1,5 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { unlink } from "node:fs/promises";
-import path from "node:path";
 import { db, document, readingProgress, groupMember, group, user, eq, and, or, isNull, desc, sql, ilike, count } from "@lectio/db";
 import { protectedProcedure, adminProcedure, teacherProcedure, router } from "../index";
 
@@ -223,13 +221,9 @@ export const documentsRouter = router({
         });
       }
 
-      // Supprimer le fichier physique du disque
+      // Les copies dans les classes partagent le même fichier. Un retrait ne
+      // supprime que la référence ; le nettoyage physique doit être séparé.
       const fileSize = parseInt(book.filesize || "0", 10);
-      try {
-        await unlink(path.join(process.cwd(), book.filepath));
-      } catch {
-        // Silently ignore file deletion errors - DB record will still be removed
-      }
 
       await db.delete(document).where(eq(document.id, input.id));
 
@@ -302,14 +296,7 @@ export const documentsRouter = router({
         });
       }
 
-      // Supprimer le fichier physique du disque
-      try {
-        await unlink(path.join(process.cwd(), book.filepath));
-      } catch {
-        // Silently ignore file deletion errors - DB record will still be removed
-      }
-
-      // Supprimer le livre de la base de données
+      // Conserver le fichier partagé par les autres livres et classes.
       await db.delete(document).where(eq(document.id, input.bookId));
 
       return { success: true };

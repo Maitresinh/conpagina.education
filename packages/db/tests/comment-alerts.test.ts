@@ -1,5 +1,8 @@
 import { beforeAll, beforeEach, afterAll, expect, mock, test } from "bun:test";
 import { PGlite } from "@electric-sql/pglite";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { drizzle } from "drizzle-orm/pglite";
 import * as operators from "drizzle-orm";
 import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
@@ -12,6 +15,7 @@ mock.module("@lectio/db", () => ({ ...schema, ...operators, db }));
 const { enqueueCommentAlerts, processCommentAlert } = await import("../../api/src/lib/comment-alerts");
 const { readingRouter } = await import("../../api/src/routers/reading");
 const { notificationsRouter } = await import("../../api/src/routers/notifications");
+const { documentsRouter } = await import("../../api/src/routers/documents");
 const { eq } = operators;
 const now = new Date("2026-11-25T12:00:00Z");
 const transaction = (fn: any) => db.transaction(fn);
@@ -43,6 +47,28 @@ async function event(id = "comment", parentId: string | null = null) {
   });
 }
 const jobs = () => db.select().from(schema.commentAlertDelivery);
+
+for (const operation of ["deleteBook", "removeBookFromGroup"] as const) {
+  test(`${operation} preserves the shared EPUB and annotations on other copies`, async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "conpagina-shared-book-"));
+    const filepath = path.join(directory, "shared.epub");
+    try {
+      await Bun.write(filepath, "shared book content");
+      await db.update(schema.document).set({ filepath }).where(eq(schema.document.id, "book"));
+      await db.insert(schema.document).values({ id: "copy", title: "Copie", filename: "shared.epub", filepath, ownerId: "teacher", groupId: "class" });
+      await db.update(schema.groupMember).set({ role: "OWNER" }).where(eq(schema.groupMember.userId, "teacher"));
+      await event();
+      const documents = documentsRouter.createCaller(context("teacher"));
+      if (operation === "deleteBook") await documents.deleteBook({ id: "copy" });
+      else await documents.removeBookFromGroup({ bookId: "copy", groupId: "class" });
+      expect(await Bun.file(filepath).text()).toBe("shared book content");
+      expect((await db.select().from(schema.document)).map(book => book.id)).toEqual(["book"]);
+      expect((await db.select().from(schema.annotation)).map(note => note.id)).toEqual(["comment"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+}
 
 test("comment creation queues teacher mail atomically and excludes self/unsubscribed recipients", async () => {
   const result = await reader().createAnnotation({ documentId: "book", cfiRange: "epubcfi(test)", selectedText: "Passage", comment: "Le commentaire" });
