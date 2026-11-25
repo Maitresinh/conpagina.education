@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Bell, Mail, Save } from "lucide-react";
 import { trpc } from "@/utils/trpc";
@@ -10,6 +10,7 @@ import { toast } from "sonner";
 type Preferences = { emailFrequency: "off" | "immediate" | "daily"; newComments: boolean; replies: boolean; groupIds: string[] };
 
 export default function NotificationSettings() {
+  const scopeName = useId();
   const query = useQuery(trpc.notifications.getPreferences.queryOptions());
   const groups = useQuery(trpc.groups.list.queryOptions());
   const mutation = useMutation(trpc.notifications.updatePreferences.mutationOptions());
@@ -43,8 +44,8 @@ export default function NotificationSettings() {
         <label className="flex gap-3"><input type="checkbox" checked={prefs.replies} onChange={e => update({ replies: e.target.checked })} /> Réponses dans les discussions</label>
       </fieldset>
       <fieldset className="space-y-3"><legend className="mb-2 font-medium">Classes et clubs suivis</legend>
-        <label className="flex gap-3"><input type="radio" name="scope" checked={!limited} onChange={() => setSelectedOnly(false)} /> Toutes mes classes et tous mes clubs</label>
-        <label className="flex gap-3"><input type="radio" name="scope" checked={limited} onChange={() => setSelectedOnly(true)} /> Uniquement ma sélection</label>
+        <label className="flex gap-3"><input type="radio" name={scopeName} checked={!limited} onChange={() => setSelectedOnly(false)} /> Toutes mes classes et tous mes clubs</label>
+        <label className="flex gap-3"><input type="radio" name={scopeName} checked={limited} onChange={() => setSelectedOnly(true)} /> Uniquement ma sélection</label>
         {limited && <div className="space-y-3 pl-5">{groups.data?.map(g => <label key={g.id} className="flex gap-3"><input type="checkbox" checked={prefs.groupIds.includes(g.id)} onChange={e => update({ groupIds: e.target.checked ? [...prefs.groupIds, g.id] : prefs.groupIds.filter(id => id !== g.id) })} />{g.name}</label>)}</div>}
       </fieldset>
       <p className="text-sm text-muted-foreground">Vos propres commentaires et les annotations privées ne sont pas envoyés. Le bouton Répondre ouvre la discussion dans Conpagina.</p>
