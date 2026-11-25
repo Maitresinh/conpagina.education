@@ -559,6 +559,7 @@ app.post("/api/upload/image", async (c) => {
     const filepath = path.join(uploadsDir, filename);
 
     // Sauvegarder le fichier
+    const buffer = await file.arrayBuffer();
     await writeFile(filepath, Buffer.from(buffer));
 
     log.info("Image uploaded", { filename, user: session.user.id });
