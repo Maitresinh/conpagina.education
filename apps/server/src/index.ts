@@ -1,3 +1,4 @@
+import { documentFormat, unreferencedReadingFiles } from "./lib/document-format";
 import "dotenv/config";
 import { trpcServer } from "@hono/trpc-server";
 import { createContext } from "@lectio/api/context";
@@ -338,8 +339,8 @@ app.on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 // Rate limiting sur l'upload
 app.use("/api/upload/*", uploadRateLimiter);
 
-// Endpoint pour uploader un EPUB
-app.post("/api/upload/epub", async (c) => {
+// Même contrôle d’accès pour EPUB et PDF ; ancienne route conservée.
+app.on("POST", ["/api/upload/document", "/api/upload/epub"], async (c) => {
   try {
     // Vérifier l'authentification
     const session = await auth.api.getSession({
@@ -355,13 +356,14 @@ app.post("/api/upload/epub", async (c) => {
     const groupId = formData.get("groupId") as string | null;
     const isPublic = formData.get("isPublic") as string | null;
 
-    if (!file) {
+    if (!(file instanceof File)) {
       return c.json({ error: "No file provided" }, 400);
     }
 
-    // Vérifier le type MIME
-    if (file.type !== "application/epub+zip") {
-      return c.json({ error: "Only EPUB files are allowed" }, 400);
+    const buffer = await file.arrayBuffer();
+    const format = documentFormat(file.name, file.type, new Uint8Array(buffer, 0, Math.min(1024, buffer.byteLength)));
+    if (!format) {
+      return c.json({ error: "Le fichier doit être un EPUB ou un PDF valide." }, 400);
     }
 
     // Récupérer le rôle de l'utilisateur
@@ -421,42 +423,43 @@ app.post("/api/upload/epub", async (c) => {
     // Générer un nom de fichier unique
     const fileId = crypto.randomUUID();
     const filename = file.name;
-    const filepath = path.join(uploadsDir, `${fileId}.epub`);
+    const filepath = path.join(uploadsDir, `${fileId}.${format.extension}`);
 
     // Sauvegarder le fichier
-    const buffer = await file.arrayBuffer();
     await writeFile(filepath, Buffer.from(buffer));
 
     // Extraire les métadonnées (Titre et Auteur)
-    let title = filename.replace(".epub", "");
+    let title = filename.replace(/\.(epub|pdf)$/i, "");
     let author: string | null = null;
 
     try {
-      const JSZip = (await import("jszip")).default;
-      const zip = await JSZip.loadAsync(buffer);
+      if (format.extension === "epub") {
+        const JSZip = (await import("jszip")).default;
+        const zip = await JSZip.loadAsync(buffer);
 
-      const containerFile = zip.file("META-INF/container.xml");
-      if (containerFile) {
-        const containerXml = await containerFile.async("string");
-        const rootfileMatch = containerXml.match(/full-path="([^"]+)"/);
+        const containerFile = zip.file("META-INF/container.xml");
+        if (containerFile) {
+          const containerXml = await containerFile.async("string");
+          const rootfileMatch = containerXml.match(/full-path="([^"]+)"/);
 
-        if (rootfileMatch) {
-          const opfPath = rootfileMatch[1];
-          const opfFile = zip.file(opfPath);
+          if (rootfileMatch) {
+            const opfPath = rootfileMatch[1];
+            const opfFile = zip.file(opfPath);
 
-          if (opfFile) {
-            const opfXml = await opfFile.async("string");
+            if (opfFile) {
+              const opfXml = await opfFile.async("string");
 
-            // Extraire le titre
-            const titleMatch = opfXml.match(/<dc:title[^>]*>(.*?)<\/dc:title>/i);
-            if (titleMatch) {
-              title = titleMatch[1];
-            }
+              // Extraire le titre
+              const titleMatch = opfXml.match(/<dc:title[^>]*>(.*?)<\/dc:title>/i);
+              if (titleMatch) {
+                title = titleMatch[1];
+              }
 
-            // Extraire l'auteur
-            const authorMatch = opfXml.match(/<dc:creator[^>]*>(.*?)<\/dc:creator>/i);
-            if (authorMatch) {
-              author = authorMatch[1];
+              // Extraire l'auteur
+              const authorMatch = opfXml.match(/<dc:creator[^>]*>(.*?)<\/dc:creator>/i);
+              if (authorMatch) {
+                author = authorMatch[1];
+              }
             }
           }
         }
@@ -474,9 +477,9 @@ app.post("/api/upload/epub", async (c) => {
         title: title,
         author: author,
         filename: filename,
-        filepath: `uploads/${fileId}.epub`,
+        filepath: `uploads/${fileId}.${format.extension}`,
         filesize: file.size.toString(),
-        mimeType: file.type,
+        mimeType: format.mimeType,
         ownerId: session.user.id,
         groupId: groupId || null,
         isPublic: isPublic === "true" ? "true" : "false",
@@ -556,7 +559,6 @@ app.post("/api/upload/image", async (c) => {
     const filepath = path.join(uploadsDir, filename);
 
     // Sauvegarder le fichier
-    const buffer = await file.arrayBuffer();
     await writeFile(filepath, Buffer.from(buffer));
 
     log.info("Image uploaded", { filename, user: session.user.id });
@@ -683,11 +685,12 @@ app.get("/api/files/:fileId", async (c) => {
     // Retourner le fichier avec les bons headers
     return new Response(file, {
       headers: {
-        "Content-Type": "application/epub+zip",
+        "Content-Type": doc.mimeType === "application/pdf" ? "application/pdf" : "application/epub+zip",
+        "X-Content-Type-Options": "nosniff",
         "Content-Length": file.size.toString(),
         "Access-Control-Allow-Origin": process.env.CORS_ORIGIN || "",
         "Access-Control-Allow-Credentials": "true",
-        "Cache-Control": "public, max-age=3600",
+        "Cache-Control": "private, no-store",
       },
     });
   } catch (error) {
@@ -812,8 +815,8 @@ app.get("/api/admin/stats", requireAdmin, async (c) => {
     const uploadsDir = path.join(process.cwd(), "uploads");
     const diskStats = await getDirectorySize(uploadsDir);
 
-    // Compter les fichiers EPUB sur disque
-    const epubFiles = diskStats.files.filter(f => f.name.endsWith(".epub"));
+    // Compter les fichiers de lecture sur disque
+    const readingFiles = diskStats.files.filter(f => /\.(epub|pdf)$/i.test(f.name));
 
     // Stats base de données
     const dbStatsResult = await db.execute(sql`
@@ -837,13 +840,9 @@ app.get("/api/admin/stats", requireAdmin, async (c) => {
       title: document.title,
       ownerId: document.ownerId
     }).from(document);
-    const dbFileIds = new Set(documentsInDb.map(d => d.id));
 
     // Fichiers sur disque sans entrée DB
-    const orphanFiles = epubFiles.filter(f => {
-      const fileId = f.name.replace(".epub", "");
-      return !dbFileIds.has(fileId);
-    });
+    const orphanFiles = unreferencedReadingFiles(readingFiles, documentsInDb, process.cwd());
 
     // Entrées DB sans fichier sur disque - avec infos enrichies
     const missingFiles: Array<{ id: string; filepath: string; title: string; ownerName: string; ownerEmail: string }> = [];
@@ -893,7 +892,7 @@ app.get("/api/admin/stats", requireAdmin, async (c) => {
       storage: {
         diskUsed: diskStats.totalSize,
         diskUsedMB: Math.round(diskStats.totalSize / 1024 / 1024),
-        totalFilesOnDisk: epubFiles.length,
+        totalFilesOnDisk: readingFiles.length,
         coversSize: diskStats.files.filter(f => f.name.startsWith("covers/")).reduce((acc, f) => acc + f.size, 0),
         siteAssetsSize: diskStats.files.filter(f => f.name.startsWith("site/")).reduce((acc, f) => acc + f.size, 0),
       },
@@ -994,15 +993,11 @@ app.post("/api/admin/cleanup-orphans", requireAdmin, async (c) => {
   try {
     const uploadsDir = path.join(process.cwd(), "uploads");
     const diskStats = await getDirectorySize(uploadsDir);
-    const epubFiles = diskStats.files.filter(f => f.name.endsWith(".epub") && !f.name.includes("/"));
+    const readingFiles = diskStats.files.filter(f => /\.(epub|pdf)$/i.test(f.name) && !f.name.includes("/"));
 
-    const documentsInDb = await db.select({ id: document.id }).from(document);
-    const dbFileIds = new Set(documentsInDb.map(d => d.id));
+    const documentsInDb = await db.select({ filepath: document.filepath }).from(document);
 
-    const orphanFiles = epubFiles.filter(f => {
-      const fileId = f.name.replace(".epub", "");
-      return !dbFileIds.has(fileId);
-    });
+    const orphanFiles = unreferencedReadingFiles(readingFiles, documentsInDb, process.cwd());
 
     const deleted: string[] = [];
     const errors: string[] = [];
@@ -1393,6 +1388,10 @@ app.get("/api/cover/:fileId", async (c) => {
     const file = Bun.file(filepath);
     if (!(await file.exists())) {
       return c.json({ error: "File not found" }, 404);
+    }
+
+    if (doc.mimeType === "application/pdf") {
+      return new Response(`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="340" viewBox="0 0 240 340"><rect width="240" height="340" fill="#e0e7ff"/><path d="M70 65h65l35 35v160H70z" fill="white" stroke="#6366f1" stroke-width="3"/><text x="120" y="185" text-anchor="middle" font-family="sans-serif" font-size="32" fill="#4338ca">PDF</text></svg>`, { headers: { "Content-Type": "image/svg+xml", "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff" } });
     }
 
     // Utiliser JSZip ou lire directement avec Bun

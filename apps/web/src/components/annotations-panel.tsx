@@ -1,5 +1,7 @@
 "use client";
 
+import { parsePdfLocation } from "@/lib/pdf-location";
+
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { X, ChevronDown, ChevronUp, MessageCircle, MapPin, BookOpen, Clock, Pencil, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -310,6 +312,8 @@ export function AnnotationsPanel({
 
   // Find chapter for a given CFI
   const getChapterForCfi = useCallback((cfiRange: string): string | null => {
+    const pdfAnchor = parsePdfLocation(cfiRange);
+    if (pdfAnchor) return `Page ${pdfAnchor.page}`;
     if (!rendition?.book || !toc.length) return null;
 
     try {
@@ -416,7 +420,7 @@ export function AnnotationsPanel({
     const sortedChapters = Array.from(groups.keys()).sort((a, b) => {
       const indexA = tocOrder.indexOf(a);
       const indexB = tocOrder.indexOf(b);
-      if (indexA === -1 && indexB === -1) return 0;
+      if (indexA === -1 && indexB === -1) return a.localeCompare(b, "fr", { numeric: true });
       if (indexA === -1) return 1;
       if (indexB === -1) return -1;
       return indexA - indexB;
@@ -513,7 +517,7 @@ export function AnnotationsPanel({
             )}
           >
             <BookOpen className="h-4 w-4" />
-            Chapitres
+            Passages
           </button>
           <button
             onClick={() => setSortMode('date')}

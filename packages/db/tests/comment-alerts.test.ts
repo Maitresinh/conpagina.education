@@ -209,3 +209,29 @@ test("deleting a comment before delivery removes its content from the digest", a
   await processCommentAlert(send, nextDigestAt(now));
   expect(send).toHaveBeenCalledTimes(1);
 });
+
+
+test("PDF passage and page comments preserve anchors, replies, progress, rights and full-content alerts", async () => {
+  await db.update(schema.document).set({ mimeType: "application/pdf", filename: "test.pdf", filepath: "uploads/test.pdf" }).where(eq(schema.document.id, "book"));
+  const anchor = 'pdf:v1:{"page":3,"rects":[{"x":0.1,"y":0.2,"width":0.3,"height":0.02}]}';
+  const root = await reader().createAnnotation({ documentId: "book", cfiRange: anchor, selectedText: "Passage intégral du PDF", comment: "Une question sur ce passage." });
+  const notes = await reader().getAnnotations({ documentId: "book" });
+  expect(notes.find(note => note.id === root.id)?.cfiRange).toBe(anchor);
+  const reply = await reader("teacher").replyToAnnotation({ documentId: "book", parentId: root.id, comment: "Voici une réponse." });
+  const replies = await reader().getAnnotationReplies({ annotationId: root.id });
+  expect(replies.find(note => note.id === reply.id)?.cfiRange).toBe(anchor);
+  const pageComment = await reader("teacher").createAnnotation({ documentId: "book", cfiRange: 'pdf:v1:{"page":4,"rects":[]}', selectedText: "Page 4", comment: "Commentaire sur une page scannée." });
+  const pageNotes = await reader().getAnnotations({ documentId: "book" });
+  expect(pageNotes.find(note => note.id === pageComment.id)?.cfiRange).toContain('"page":4');
+  await reader().saveProgress({ documentId: "book", currentLocation: "pdf:page:3", progressPercentage: 50 });
+  expect((await reader().getProgress({ documentId: "book" }))?.currentLocation).toBe("pdf:page:3");
+  await expect(reader("outsider").getAnnotations({ documentId: "book" })).rejects.toThrow();
+  await expect(reader("outsider").createAnnotation({ documentId: "book", cfiRange: anchor, selectedText: "Passage", comment: "Interdit" })).rejects.toThrow();
+  const send = mock(async () => "pdf-mail-id");
+  await processCommentAlert(send, new Date(Date.now() + 60000));
+  expect(send).toHaveBeenCalledTimes(1);
+  const mail = send.mock.calls[0]![0] as any;
+  expect(mail.text).toContain("Passage intégral du PDF");
+  expect(mail.text).toContain("Une question sur ce passage.");
+  expect(mail.text).toContain(`/read/book?annotation=${root.id}`);
+});

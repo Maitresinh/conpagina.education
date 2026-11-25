@@ -1,5 +1,7 @@
 "use client";
 
+import { DOCUMENT_ACCEPT, isReadingDocument } from "@/lib/document-upload";
+
 import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -43,7 +45,7 @@ export default function MyBooks() {
     const formData = new FormData();
     formData.append("file", file);
 
-    const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/api/upload/epub`, {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/api/upload/document`, {
       method: "POST",
       credentials: "include",
       body: formData,
@@ -146,7 +148,7 @@ export default function MyBooks() {
     const invalidFiles: string[] = [];
 
     for (const file of fileArray) {
-      if (file.type === "application/epub+zip" || file.name.endsWith(".epub")) {
+      if (isReadingDocument(file)) {
         validFiles.push(file);
       } else {
         invalidFiles.push(file.name);
@@ -154,7 +156,7 @@ export default function MyBooks() {
     }
 
     if (invalidFiles.length > 0) {
-      toast.error(`Fichiers non-EPUB ignorés: ${invalidFiles.join(', ')}`);
+      toast.error(`Formats non pris en charge (EPUB ou PDF attendus) : ${invalidFiles.join(', ')}`);
     }
 
     if (validFiles.length > 0) {
@@ -193,7 +195,7 @@ export default function MyBooks() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".epub,application/epub+zip"
+              accept={DOCUMENT_ACCEPT}
               onChange={handleFileSelect}
               className="hidden"
               id="book-upload"
@@ -239,7 +241,7 @@ export default function MyBooks() {
                 className="gap-2"
               >
                 <Upload className="h-4 w-4" />
-                Importer votre premier EPUB
+                Importer votre premier EPUB ou PDF
               </Button>
             ) : (
               <p className="text-xs text-muted-foreground">

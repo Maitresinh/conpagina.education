@@ -43,7 +43,8 @@ const nextConfig: NextConfig = {
       script-src 'self' 'unsafe-eval' 'unsafe-inline';
       style-src 'self' 'unsafe-inline';
       img-src 'self' blob: data: ${apiServerUrl} ${appUrl} ${otherApiUrl};
-      font-src 'self';
+      font-src 'self' blob: data:;
+      worker-src 'self';
       connect-src 'self' ${apiServerUrl} ${appUrl} ${otherApiUrl};
     `.replace(/\s{2,}/g, " ").trim();
 

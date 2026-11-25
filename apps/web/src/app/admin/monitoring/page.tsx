@@ -303,7 +303,7 @@ export default function MonitoringPage() {
                   <>
                     <div className="text-2xl font-bold">{stats?.storage.diskUsedMB} MB</div>
                     <p className="text-xs text-muted-foreground">
-                      {stats?.storage.totalFilesOnDisk} fichiers EPUB
+                      {stats?.storage.totalFilesOnDisk} fichiers EPUB/PDF
                     </p>
                   </>
                 )}
@@ -421,7 +421,7 @@ export default function MonitoringPage() {
           <div className="grid gap-4 md:grid-cols-3">
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm font-medium">Fichiers EPUB</CardTitle>
+                <CardTitle className="text-sm font-medium">Fichiers EPUB/PDF</CardTitle>
               </CardHeader>
               <CardContent>
                 {statsLoading ? (

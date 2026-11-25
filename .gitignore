@@ -83,3 +83,5 @@ backup_*.sql
 # Scripts personnalisés
 scripts/*.local.sh
 CLAUDE.md
+# Generated PDF.js assets (copied before dev/build)
+/apps/web/public/pdfjs/
